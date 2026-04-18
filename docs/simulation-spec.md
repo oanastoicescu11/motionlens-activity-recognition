@@ -13,9 +13,12 @@
 
 ## 1. Overview
 
-The simulator generates five co-registered time-series signals — triaxial
-accelerometry (ACC), respiration (RSP), skin temperature (SKT), heart rate (HR),
-and activity labels — for a single body-worn sensor session.  The design goal is
+The simulator generates four co-registered time-series signals — triaxial
+accelerometry (ACC), respiration (RSP), skin temperature (SKT), and activity
+labels — for a single body-worn sensor session.  Heart rate (HR) is maintained
+as internal state (it drives breathing-rate coupling via `K_MV`) but is **not**
+included in the output: `step()` returns `(t, ax, ay, az, rsp, skt, activity)`
+and the CSV header is `time,acc_x,acc_y,acc_z,rsp,skt,activity`.  The design goal is
 statistical realism: Monte Carlo runs of the simulator should reproduce the
 distributional properties (means, standard deviations, spectral features,
 artifact rates) observed across five real wearable datasets totalling > 170
@@ -231,9 +234,14 @@ postural readjustment, modelled as an exponentially decaying envelope.
 **Stress fidgets** (active only during `stress`):
 - Trigger probability: 0.0006 per sample (~1.8 events/min at 50 Hz)
 - Duration: 1–3 s
-- Amplitude: 0.5–2.0 m/s² (sinusoidal at 2–5 Hz)
+- Amplitude: 0.5–2.0 m/s² (per-sample random frequency in 2–5 Hz)
 - Cross-axis distribution: Z = 100%, X = 50%, Y = 30%
 - Cooldown: 30–120 s between fidgets
+- **Implementation note**: The frequency `np.random.uniform(2, 5)` is drawn
+  independently for each sample inside the burst generation loop
+  (`simulate.py:464`), so the waveform is **chaotic noise** in the 2–5 Hz band
+  rather than a coherent single-frequency sinusoid.  This produces a broadband
+  fidget-like transient.
 - **Provenance**: Models hand/leg fidgeting observed in seated stress tasks.
   D4 stress-task ACC STD (0.284 m/s²) is higher than stress-rest (0.211 m/s²),
   partially accounted for by these bursts.
@@ -334,6 +342,10 @@ dependent IE targets (see §4.3).
 Breathing amplitude: τ_rsp_amp = 20 s (all activities). Engineering choice for
 smooth tidal volume transitions.
 
+IE ratio: `ie_ratio` is smoothed with the **same** time constant as `f_resp`
+(i.e. `τ_rsp_freq` per activity): `s.ie_ratio += (DT / tau_rsp) * (ie_tgt - s.ie_ratio)`
+(`simulate.py:362`).
+
 ### 4.5 RSP Noise and Breath-to-Breath Variability
 
 | Activity | σ_rsp (a.u.) | Rate variability (CV) | Provenance |
@@ -355,10 +367,13 @@ Rate variability is implemented as a phase perturbation:
 During gait, breathing tends to phase-lock to stepping at integer ratios [11,12]:
 
 ```
-n_lrc = round(f_step / f_resp)   # nearest integer coupling ratio
+n_lrc = max(1, round(f_step / f_resp))   # nearest integer coupling ratio, clamped ≥ 1
 correction = K_LRC · sin(n_lrc · φ_z − φ_resp)
 φ_resp += 2π · correction · DT
 ```
+
+The `max(1, ...)` clamp (`simulate.py:377`) prevents `n_lrc = 0` during activity
+transitions where `f_step` is very small relative to `f_resp`.
 
 | Parameter | Value | Provenance |
 |-----------|-------|------------|
@@ -447,7 +462,9 @@ and 0.1 °C/min rate are engineering estimates.
 
 ### 5.5 SKT Measurement Model
 
-SKT is sampled at FS_TEMP = 4 Hz (every 12.5 ACC samples):
+SKT is emitted every `temp_interval = int(FS / FS_TEMP)` = `int(50 / 4)` = **12**
+ACC samples (`simulate.py:527`).  Because `int(12.5)` truncates to 12, the
+effective SKT sampling rate is 50 / 12 ≈ **4.167 Hz**, not exactly 4.0 Hz.
 
 ```
 skt = T_skin + drift + N(0, 0.02)
@@ -510,10 +527,11 @@ The slow decay (half-rate) models lingering effects of exercise on physiology
 after cessation. This counter drives the prolonged-exercise skin temperature
 adjustment (§5.4).
 
-### 6.3 Heart Rate Model
+### 6.3 Heart Rate Model (Internal Only)
 
-HR is smoothed toward activity-specific targets with different time constants
-for exercise versus non-exercise states:
+HR is maintained as internal state — it is updated every sample but **never
+appears in the output** (see §1).  It is smoothed toward activity-specific
+targets with different time constants for exercise versus non-exercise states:
 
 | Activity | HR target (bpm) | τ_HR (s) | Provenance |
 |----------|----------------|----------|------------|
@@ -541,7 +559,7 @@ the same value for consecutive samples:
 | Parameter | Value | Provenance |
 |-----------|-------|------------|
 | Probability (per axis, per sample) | 0.06 | Calibrated to produce an artifact rate consistent with ADC behaviour in consumer sensors. Engineering estimate. |
-| Duration | 1–4 samples | Brief stuck periods (0.02–0.08 s at 50 Hz). |
+| Duration | 1–3 samples | `np.random.randint(*ACC_STUCK_DUR)` where `ACC_STUCK_DUR = (1, 4)`.  NumPy's `randint(1, 4)` is upper-bound exclusive → actual values are {1, 2, 3} = 0.02–0.06 s at 50 Hz. |
 
 ### 7.2 RSP Sensor Glitches
 
