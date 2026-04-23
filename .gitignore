@@ -1,6 +1,10 @@
 /analyses
 /.github/skills
+/.vscode
 /data
+/output
+/.continue
+/.github/copilot-instructions.md
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[codz]
