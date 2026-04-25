@@ -35,7 +35,7 @@ import pyarrow as pa
 import pyarrow.csv as pa_csv
 import pyarrow.parquet as pq
 
-from processing.preprocessing import (
+from core.preprocessing import (
     AccelerometerSegment,
     preprocess_numeric_timeseries as preprocess_numeric_segments,
     preprocess_timestamp_timeseries as preprocess_timestamp_segments,

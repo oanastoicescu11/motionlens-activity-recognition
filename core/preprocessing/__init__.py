@@ -1,6 +1,6 @@
-"""Backward-compatible preprocessing exports from core."""
+"""Reusable accelerometer preprocessing primitives."""
 
-from core.preprocessing import (
+from .accelerometer import (
     AccelerometerSegment,
     GravitySplit,
     PreprocessedAccelerometerSegment,
