@@ -10,7 +10,7 @@ import math
 
 import numpy as np
 
-from core.inference.motionlens_inference import FINE_TO_COARSE
+from core.inference.model import FINE_TO_COARSE
 
 
 def estimate_transition_stats(

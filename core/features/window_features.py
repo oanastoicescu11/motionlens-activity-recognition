@@ -380,12 +380,14 @@ def window_feature_names(placement_labels: Sequence[str], axes: Sequence[str] = 
             "gravity_x_std",
             "gravity_y_std",
             "gravity_z_std",
-            "gravity_tilt_mean_rad",
-            "gravity_tilt_std_rad",
-            "gravity_pitch_mean",
-            "gravity_pitch_std",
-            "gravity_roll_mean",
-            "gravity_roll_std",
+            "gravity_tilt_abs_z_mean",
+            "gravity_tilt_abs_z_std",
+            "gravity_tilt_abs_z_range",
+            "gravity_tilt_abs_z_p90",
+            "gravity_max_axis_alignment_mean",
+            "gravity_max_axis_alignment_std",
+            "gravity_axis_entropy_mean",
+            "gravity_axis_entropy_std",
             "gravity_angle_stability_std",
             "body_vertical_mean",
             "body_vertical_std",
@@ -585,11 +587,29 @@ def compute_window_features(
 
     features.extend(list(_peak_features(centered_mag, target_sample_rate_hz)))
 
+    # Orientation-invariant gravity features.
+    # tilt_abs_z = arccos(|gz|/mag) — same for normal and upside-down phones.
+    # max_axis_alignment = max(|gx|, |gy|, |gz|) / mag — which gravity axis dominates.
+    # axis_entropy = -sum(|gi|/mag * log(|gi|/mag)) / log(3) — how evenly distributed.
     gravity_mag = np.sqrt(split.gravity_x ** 2 + split.gravity_y ** 2 + split.gravity_z ** 2)
     safe_gravity_mag = np.maximum(gravity_mag, 1e-8)
-    gravity_tilt = np.arccos(np.clip(np.abs(split.gravity_z) / safe_gravity_mag, 0.0, 1.0))
-    gravity_pitch = np.arctan2(-split.gravity_x, np.sqrt(split.gravity_y ** 2 + split.gravity_z ** 2))
-    gravity_roll = np.arctan2(split.gravity_y, split.gravity_z)
+    abs_gz_ratio = np.abs(split.gravity_z) / safe_gravity_mag
+    gravity_tilt_abs_z = np.arccos(np.clip(abs_gz_ratio, 0.0, 1.0))
+
+    # max axis alignment: which gravity component dominates
+    abs_gx = np.abs(split.gravity_x)
+    abs_gy = np.abs(split.gravity_y)
+    abs_gz = np.abs(split.gravity_z)
+    gravity_max_axis = np.maximum(np.maximum(abs_gx, abs_gy), abs_gz)
+    gravity_max_axis_alignment = gravity_max_axis / safe_gravity_mag
+
+    # axis entropy — how evenly gravity is distributed across axes
+    # normalized so entropy=1 means perfectly uniform, entropy=0 means single axis
+    g_norm = np.stack([abs_gx, abs_gy, abs_gz], axis=1) / safe_gravity_mag[:, None]
+    g_norm = np.clip(g_norm, 1e-12, 1.0)  # avoid log(0)
+    entropy_raw = -np.sum(g_norm * np.log(g_norm), axis=1)
+    gravity_axis_entropy = entropy_raw / np.log(3.0)
+
     features.extend(
         [
             float(np.mean(gravity_mag)),
@@ -599,12 +619,14 @@ def compute_window_features(
             _safe_std(split.gravity_x),
             _safe_std(split.gravity_y),
             _safe_std(split.gravity_z),
-            float(np.mean(gravity_tilt)),
-            _safe_std(gravity_tilt),
-            float(np.mean(gravity_pitch)),
-            _safe_std(gravity_pitch),
-            float(np.mean(gravity_roll)),
-            _safe_std(gravity_roll),
+            float(np.mean(gravity_tilt_abs_z)),
+            _safe_std(gravity_tilt_abs_z),
+            float(np.max(gravity_tilt_abs_z) - np.min(gravity_tilt_abs_z)) if gravity_tilt_abs_z.size >= 2 else 0.0,
+            float(np.percentile(gravity_tilt_abs_z, 90)) if gravity_tilt_abs_z.size > 0 else 0.0,
+            float(np.mean(gravity_max_axis_alignment)),
+            _safe_std(gravity_max_axis_alignment),
+            float(np.mean(gravity_axis_entropy)),
+            _safe_std(gravity_axis_entropy),
             _gravity_angle_stability(split.gravity_x, split.gravity_y, split.gravity_z),
         ]
     )
@@ -614,6 +636,7 @@ def compute_window_features(
     g_norm = np.linalg.norm(gravity, axis=1, keepdims=True)
     g_unit = gravity / np.maximum(g_norm, 1e-8)
     body_vertical = np.sum(body * g_unit, axis=1)
+
     body_horizontal_vec = body - body_vertical[:, None] * g_unit
     body_horizontal_mag = np.linalg.norm(body_horizontal_vec, axis=1)
 
@@ -640,7 +663,7 @@ def compute_window_features(
     second_half_energy = float(np.mean(second_half ** 2)) if second_half.size else 0.0
     body_mag_half_energy_ratio = second_half_energy / (first_half_energy + 1e-8)
     gravity_tilt_start_end_delta = (
-        float(gravity_tilt[-1] - gravity_tilt[0]) if gravity_tilt.size >= 2 else 0.0
+        float(gravity_tilt_abs_z[-1] - gravity_tilt_abs_z[0]) if gravity_tilt_abs_z.size >= 2 else 0.0
     )
     if body_mag.size >= 2:
         t = np.arange(body_mag.size, dtype=np.float64) / target_sample_rate_hz

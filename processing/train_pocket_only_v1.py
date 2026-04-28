@@ -1,4 +1,8 @@
-"""Train and evaluate a first XGBoost baseline on MotionLens contract windows."""
+"""Train pocket-only XGBoost model -- identical logic to motionlens_xgboost_baseline.py
+but with two differences:
+  1. Data is filtered to smartphone pocket / lateral-waist placements only.
+  2. Placement one-hot features are NOT included (placement_labels=[]).
+"""
 
 from __future__ import annotations
 
@@ -20,8 +24,6 @@ if __package__ in {None, ""}:
 import joblib
 import numpy as np
 import pyarrow.parquet as pq
-import pywt as _pywt
-from scipy.signal import stft as _compute_stft
 from sklearn.metrics import confusion_matrix, f1_score
 from sklearn.model_selection import GroupShuffleSplit, StratifiedShuffleSplit
 
@@ -32,8 +34,10 @@ from core.features import (
 from core.inference import (
     apply_static_specialist_refinement as core_apply_static_specialist_refinement,
     causal_hmm_decode as core_causal_hmm_decode,
-    decode_predictions as core_decode_predictions,
     predict_hierarchical_proba as core_predict_hierarchical_proba,
+)
+from processing.inference import (
+    decode_predictions as core_decode_predictions,
 )
 from processing.training_transition_stats import (
     estimate_transition_stats as training_estimate_transition_stats,
@@ -47,36 +51,47 @@ DEFAULT_TARGET_LABELS = (
     "walk",
     "run",
     "stairs",
-    "sit",
+    "sit/lay",
     "stand",
-    "lay",
     "transitions",
     "locomotion-other",
 )
 
-PLACEMENT_LABELS = (
-    "chest",
-    "front_center_mid",
-    "front_center_lower",
-    "front_side_left_mid",
-    "front_side_right_mid",
+# Raw contract labels "sit" and "lay" are merged into the joint class "sit/lay".
+LABEL_REMAP: dict[str, str] = {"sit": "sit/lay", "lay": "sit/lay"}
+
+# No placement one-hot features for pocket-only model
+PLACEMENT_LABELS: tuple[str, ...] = ()
+
+# Pocket-only data filter -- only these datasets and placements are used for training
+POCKET_DATASETS = frozenset({
+    "wisdm",
+    "motion_sense",
+    "uma_fall",
+    "unimib_shar",
+    "wisdm_v2",
+    "real_world",
+    "shoaib_2013",
+    "shoaib_sensors",
+    "ut_complex",
+    "iphone_sweep",
+})
+POCKET_PLACEMENTS = frozenset({
+    "front_pocket",
     "lateral_left_lower",
     "lateral_right_lower",
-    "front_pocket",
-    "unknown_free_living",
-)
+})
 
 AXES = ("x", "y", "z")
 
 COARSE_LABEL_ORDER = ("locomotion", "static", "transition", "other")
-STATIC_SPECIALIST_LABELS = ("sit", "stand", "lay")
+STATIC_SPECIALIST_LABELS = ("sit/lay", "stand")
 FINE_TO_COARSE = {
     "walk": "locomotion",
     "run": "locomotion",
     "stairs": "locomotion",
-    "sit": "static",
+    "sit/lay": "static",
     "stand": "static",
-    "lay": "static",
     "transitions": "transition",
     "locomotion-other": "other",
 }
@@ -86,7 +101,7 @@ LOGGER = logging.getLogger(__name__)
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Train an XGBoost baseline from MotionLens contract parquet artifacts."
+        description="Train a pocket-only XGBoost model (no placement features)."
     )
     parser.add_argument(
         "--contract-dir",
@@ -97,7 +112,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--output-dir",
         type=Path,
-        default=Path("output") / "model_baseline",
+        default=Path("output") / "model_pocket_only_v1",
         help="Directory for model and evaluation artifacts.",
     )
     parser.add_argument(
@@ -189,7 +204,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--disable-static-specialist",
         action="store_true",
-        help="Disable static-posture specialist refinement for sit/stand/lay.",
+        help="Disable static-posture specialist refinement for still/lay.",
     )
     parser.add_argument(
         "--static-specialist-threshold",
@@ -225,6 +240,60 @@ def parse_args() -> argparse.Namespace:
         type=float,
         default=1.0,
         help="Blend strength for dataset balancing in [0,1]; 1 applies the full factor.",
+    )
+    parser.add_argument(
+        "--xgb-n-estimators",
+        type=int,
+        default=None,
+        help="Override XGBoost n_estimators without running tuning.",
+    )
+    parser.add_argument(
+        "--xgb-max-depth",
+        type=int,
+        default=None,
+        help="Override XGBoost max_depth without running tuning.",
+    )
+    parser.add_argument(
+        "--xgb-min-child-weight",
+        type=int,
+        default=None,
+        help="Override XGBoost min_child_weight without running tuning.",
+    )
+    parser.add_argument(
+        "--xgb-learning-rate",
+        type=float,
+        default=None,
+        help="Override XGBoost learning_rate without running tuning.",
+    )
+    parser.add_argument(
+        "--xgb-subsample",
+        type=float,
+        default=None,
+        help="Override XGBoost subsample without running tuning.",
+    )
+    parser.add_argument(
+        "--xgb-colsample-bytree",
+        type=float,
+        default=None,
+        help="Override XGBoost colsample_bytree without running tuning.",
+    )
+    parser.add_argument(
+        "--xgb-gamma",
+        type=float,
+        default=None,
+        help="Override XGBoost gamma without running tuning.",
+    )
+    parser.add_argument(
+        "--xgb-reg-alpha",
+        type=float,
+        default=None,
+        help="Override XGBoost reg_alpha without running tuning.",
+    )
+    parser.add_argument(
+        "--xgb-reg-lambda",
+        type=float,
+        default=None,
+        help="Override XGBoost reg_lambda without running tuning.",
     )
     return parser.parse_args()
 
@@ -511,6 +580,8 @@ def collect_training_examples(
     list[str],
     list[str],
     list[str],
+    list[str],
+    list[str],
 ]:
     sample_root = contract_dir / "samples"
     if not sample_root.exists():
@@ -551,6 +622,8 @@ def collect_training_examples(
     x_test: list[np.ndarray] = []
     y_test: list[str] = []
     dataset_test: list[str] = []
+    placement_train: list[str] = []
+    placement_test: list[str] = []
     subject_train: list[str] = []
     subject_test: list[str] = []
     train_sequence_groups: list[str] = []
@@ -559,8 +632,17 @@ def collect_training_examples(
     for parquet_file in all_files:
         for record in _iter_window_records(parquet_file):
             activity_label = str(record["activity_label"])
+            # Merge sit and lay into joint class before all downstream processing
+            activity_label = LABEL_REMAP.get(activity_label, activity_label)
             split = str(record["split"])
+            dataset_id = str(record["dataset_id"])
+            placement_label = str(record["placement_label"])
 
+            # Pocket-only filter: skip records from wrong datasets or placements
+            if dataset_id not in POCKET_DATASETS:
+                continue
+            if placement_label not in POCKET_PLACEMENTS:
+                continue
             if activity_label not in target_labels:
                 continue
 
@@ -577,6 +659,7 @@ def collect_training_examples(
                 x_test.append(features)
                 y_test.append(activity_label)
                 dataset_test.append(str(record["dataset_id"]))
+                placement_test.append(str(record["placement_label"]))
                 test_sequence_groups.append(
                     f"{record['dataset_id']}|{record['global_subject_id']}|{record['stream_id']}"
                 )
@@ -584,6 +667,7 @@ def collect_training_examples(
                 x_train.append(features)
                 y_train.append(activity_label)
                 dataset_train.append(str(record["dataset_id"]))
+                placement_train.append(str(record["placement_label"]))
                 subject_train.append(f"{record['dataset_id']}|{record['global_subject_id']}")
                 train_sequence_groups.append(
                     f"{record['dataset_id']}|{record['global_subject_id']}|{record['stream_id']}"
@@ -617,6 +701,8 @@ def collect_training_examples(
         test_sequence_groups,
         subject_train,
         subject_test,
+        placement_train,
+        placement_test,
     )
 
 
@@ -638,6 +724,30 @@ def _base_xgb_params(num_classes: int) -> dict[str, float | int | str]:
         "n_jobs": -1,
         "random_state": 42,
     }
+
+
+def _apply_xgb_param_overrides(
+    params: dict[str, float | int | str],
+    args: argparse.Namespace,
+) -> dict[str, float | int | str]:
+    """Apply optional CLI XGBoost overrides for train-only runs."""
+
+    out = dict(params)
+    overrides: dict[str, float | int | None] = {
+        "n_estimators": args.xgb_n_estimators,
+        "max_depth": args.xgb_max_depth,
+        "min_child_weight": args.xgb_min_child_weight,
+        "learning_rate": args.xgb_learning_rate,
+        "subsample": args.xgb_subsample,
+        "colsample_bytree": args.xgb_colsample_bytree,
+        "gamma": args.xgb_gamma,
+        "reg_alpha": args.xgb_reg_alpha,
+        "reg_lambda": args.xgb_reg_lambda,
+    }
+    for key, value in overrides.items():
+        if value is not None:
+            out[key] = value
+    return out
 
 
 def _sample_hyperparameter_candidates(trials: int, search_space: str) -> list[dict[str, float | int]]:
@@ -769,11 +879,11 @@ def _compute_sample_weights(
     base = total / np.maximum(1.0, counts * len(label_order))
 
     class_weight: dict[str, float] = {}
-    sit_stand_boost = 1.25
+    still_boost = 1.25
     for idx, label in enumerate(label_order):
         weight = float(base[idx])
-        if label in {"sit", "stand"}:
-            weight *= sit_stand_boost
+        if label == "still":
+            weight *= still_boost
         class_weight[label] = weight
 
     sample_weight = np.asarray([class_weight[label_order[idx]] for idx in y_train], dtype=np.float32)
@@ -1094,7 +1204,12 @@ def _fit_with_hard_negative_mining(
     if not enabled:
         return 0.0, False
 
-    train_pred = np.asarray(model.predict(x_train), dtype=np.int32)
+    _train_pred_raw = model.predict(x_train)
+    if np.asarray(_train_pred_raw).ndim == 2:
+        # XGBoost multi:softprob with num_class=2 returns a probability matrix
+        train_pred = np.argmax(_train_pred_raw, axis=1).astype(np.int32)
+    else:
+        train_pred = np.asarray(_train_pred_raw, dtype=np.int32)
     miss_mask = train_pred != y_train
     miss_rate = float(np.mean(miss_mask))
     if not np.any(miss_mask):
@@ -1292,25 +1407,52 @@ def _append_experiment_history(path: Path, row: dict[str, str]) -> None:
         writer.writerow({name: row.get(name, "") for name in fieldnames})
 
 
-def _write_per_dataset_metrics(path: Path, dataset_names: list[str], y_true: np.ndarray, y_pred: np.ndarray) -> None:
-    by_dataset: dict[str, list[int]] = {}
-    for idx, dataset_id in enumerate(dataset_names):
-        by_dataset.setdefault(dataset_id, []).append(idx)
+def _write_group_metrics(
+    path: Path,
+    group_names: list[str],
+    y_true: np.ndarray,
+    y_pred: np.ndarray,
+    *,
+    group_column: str,
+) -> None:
+    by_group: dict[str, list[int]] = {}
+    for idx, group_name in enumerate(group_names):
+        by_group.setdefault(group_name, []).append(idx)
 
     rows: list[tuple[str, int, float]] = []
-    for dataset_id in sorted(by_dataset):
-        indices = by_dataset[dataset_id]
+    for group_name in sorted(by_group):
+        indices = by_group[group_name]
         subset_true = y_true[indices]
         subset_pred = y_pred[indices]
         accuracy = float(np.mean(subset_true == subset_pred))
-        rows.append((dataset_id, len(indices), accuracy))
+        rows.append((group_name, len(indices), accuracy))
 
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("w", encoding="utf-8", newline="") as handle:
         writer = csv.writer(handle)
-        writer.writerow(["dataset_id", "num_windows", "accuracy"])
-        for dataset_id, count, accuracy in rows:
-            writer.writerow([dataset_id, count, f"{accuracy:.6f}"])
+        writer.writerow([group_column, "num_windows", "accuracy"])
+        for group_name, count, accuracy in rows:
+            writer.writerow([group_name, count, f"{accuracy:.6f}"])
+
+
+def _write_per_dataset_metrics(path: Path, dataset_names: list[str], y_true: np.ndarray, y_pred: np.ndarray) -> None:
+    _write_group_metrics(
+        path=path,
+        group_names=dataset_names,
+        y_true=y_true,
+        y_pred=y_pred,
+        group_column="dataset_id",
+    )
+
+
+def _write_per_placement_metrics(path: Path, placement_names: list[str], y_true: np.ndarray, y_pred: np.ndarray) -> None:
+    _write_group_metrics(
+        path=path,
+        group_names=placement_names,
+        y_true=y_true,
+        y_pred=y_pred,
+        group_column="placement_label",
+    )
 
 
 def main() -> None:
@@ -1355,6 +1497,8 @@ def main() -> None:
         test_sequence_groups,
         train_subject_groups,
         _,
+        _,
+        placement_test,
     ) = collect_training_examples(
         contract_dir=args.contract_dir,
         target_labels=target_set,
@@ -1371,6 +1515,7 @@ def main() -> None:
     x_test = x_test[test_mask]
     y_test_str = y_test_str[test_mask]
     dataset_test = [dataset_test[idx] for idx, keep in enumerate(test_mask) if keep]
+    placement_test = [placement_test[idx] for idx, keep in enumerate(test_mask) if keep]
     y_test = np.asarray([label_to_idx[label] for label in y_test_str], dtype=np.int32)
 
     if x_test.size == 0:
@@ -1398,7 +1543,7 @@ def main() -> None:
         dataset_balance_mode=args.dataset_balance_mode,
         dataset_balance_strength=args.dataset_balance_strength,
     )
-    LOGGER.info("Using class-balanced sample weights (sit/stand boosted): %s", class_weights)
+    LOGGER.info("Using class-balanced sample weights (still boosted): %s", class_weights)
     if dataset_weights:
         LOGGER.info(
             "Using dataset balancing mode=%s strength=%.2f weights=%s",
@@ -1408,6 +1553,7 @@ def main() -> None:
         )
 
     model_params = _base_xgb_params(num_classes=len(label_order))
+    model_params = _apply_xgb_param_overrides(model_params, args)
     static_specialist_enabled = not args.disable_static_specialist
     effective_decoder_sticky_prior = float(args.decoder_sticky_prior)
     effective_decoder_cross_coarse_penalty = float(args.decoder_cross_coarse_penalty)
@@ -1738,9 +1884,23 @@ def main() -> None:
         y_pred=y_pred_raw,
     )
 
+    _write_per_placement_metrics(
+        path=output_dir / "per_placement_metrics_raw.csv",
+        placement_names=placement_test,
+        y_true=y_test,
+        y_pred=y_pred_raw,
+    )
+
     _write_per_dataset_metrics(
         path=output_dir / "per_dataset_metrics.csv",
         dataset_names=dataset_test,
+        y_true=y_test,
+        y_pred=y_pred,
+    )
+
+    _write_per_placement_metrics(
+        path=output_dir / "per_placement_metrics.csv",
+        placement_names=placement_test,
         y_true=y_test,
         y_pred=y_pred,
     )
@@ -1810,6 +1970,8 @@ def main() -> None:
         "window_samples": WINDOW_SAMPLES,
     }
     joblib.dump(inference_bundle, output_dir / "inference_bundle.joblib")
+    # Standalone base model for the worker pipeline (artifacts/model/model_pocket_only.joblib)
+    joblib.dump(model, output_dir / "model_pocket_only.joblib")
 
     with (output_dir / "inference_config.json").open("w", encoding="utf-8") as handle:
         json.dump(

@@ -5,6 +5,7 @@
 /output
 /.continue
 /.github/copilot-instructions.md
+/plans
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[codz]

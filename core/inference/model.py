@@ -1,8 +1,9 @@
-"""Reusable MotionLens inference and post-processing utilities for training and live apps."""
+"""MotionLens inference, decoding, and decoder-state utilities for training and live apps."""
 
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Any
 
 import numpy as np
 
@@ -87,6 +88,53 @@ def apply_static_specialist_refinement(
     return out
 
 
+def causal_hmm_step(
+    emission: np.ndarray,
+    *,
+    log_init_probs: np.ndarray,
+    log_trans_probs: np.ndarray,
+    previous_posterior: np.ndarray | None,
+) -> tuple[int, np.ndarray, str]:
+    """Run one causal HMM step and return (argmax_idx, posterior, state_source)."""
+
+    emission_arr = np.asarray(emission, dtype=np.float64)
+    emission_arr = np.clip(emission_arr, 1e-12, 1.0)
+    emission_sum = float(np.sum(emission_arr))
+    if emission_sum <= 0.0:
+        emission_arr = np.full(emission_arr.size, 1.0 / max(emission_arr.size, 1), dtype=np.float64)
+    else:
+        emission_arr = emission_arr / emission_sum
+
+    num_classes = emission_arr.size
+    init_probs = np.exp(np.asarray(log_init_probs, dtype=np.float64))
+    trans_probs = np.exp(np.asarray(log_trans_probs, dtype=np.float64))
+
+    prev_norm: np.ndarray | None = None
+    if previous_posterior is not None:
+        candidate = np.asarray(previous_posterior, dtype=np.float64)
+        if candidate.shape == (num_classes,) and np.all(np.isfinite(candidate)):
+            candidate_sum = float(np.sum(candidate))
+            if candidate_sum > 0.0:
+                prev_norm = candidate / candidate_sum
+
+    if prev_norm is None:
+        prior = init_probs
+        state_source = "initialized"
+    else:
+        prior = prev_norm @ trans_probs
+        state_source = "continued"
+
+    posterior = prior * emission_arr
+    norm = float(np.sum(posterior))
+    if norm <= 0.0:
+        posterior = np.full(num_classes, 1.0 / max(num_classes, 1), dtype=np.float64)
+    else:
+        posterior = posterior / norm
+
+    idx = int(np.argmax(posterior))
+    return idx, posterior, state_source
+
+
 def causal_hmm_decode(
     proba: np.ndarray,
     sequence_groups: list[str],
@@ -97,32 +145,23 @@ def causal_hmm_decode(
     if proba.shape[0] != len(sequence_groups):
         raise ValueError("Probability rows and sequence metadata lengths do not match.")
 
-    n_rows, num_classes = proba.shape
+    n_rows, _ = proba.shape
     out = np.zeros(n_rows, dtype=np.int32)
-    init_probs = np.exp(log_init_probs)
-    trans_probs = np.exp(log_trans_probs)
 
     prev_group = None
-    posterior = np.zeros(num_classes, dtype=np.float64)
+    posterior: np.ndarray | None = None
 
     for idx in range(n_rows):
-        emission = np.clip(proba[idx], 1e-12, 1.0)
         group = sequence_groups[idx]
-
-        if group != prev_group:
-            posterior = init_probs * emission
-            prev_group = group
-        else:
-            prior = posterior @ trans_probs
-            posterior = prior * emission
-
-        norm = float(np.sum(posterior))
-        if norm <= 0.0:
-            posterior = np.full(num_classes, 1.0 / num_classes, dtype=np.float64)
-        else:
-            posterior = posterior / norm
-
-        out[idx] = int(np.argmax(posterior))
+        prev_for_step = None if group != prev_group else posterior
+        pred_idx, posterior, _ = causal_hmm_step(
+            proba[idx],
+            log_init_probs=log_init_probs,
+            log_trans_probs=log_trans_probs,
+            previous_posterior=prev_for_step,
+        )
+        out[idx] = pred_idx
+        prev_group = group
 
     return out
 
@@ -162,76 +201,67 @@ def predict_hierarchical_proba(
     return full / row_sum
 
 
-def decode_predictions(
-    decoder: str,
-    y_pred_raw: np.ndarray,
-    y_proba_raw: np.ndarray,
-    sequence_groups: list[str],
-    log_init_probs: np.ndarray,
-    log_trans_probs: np.ndarray,
-) -> np.ndarray:
-    """Decode raw predictions with a supported causal strategy."""
-    if decoder == "none":
-        return y_pred_raw.copy()
-    if decoder == "causal-hmm":
-        return causal_hmm_decode(
-            proba=y_proba_raw,
-            sequence_groups=sequence_groups,
-            log_init_probs=log_init_probs,
-            log_trans_probs=log_trans_probs,
-        )
-    raise ValueError(f"Unsupported temporal decoder: {decoder}")
+def extract_decoder_posterior(
+    previous_state: dict[str, Any] | None,
+    *,
+    num_classes: int,
+) -> np.ndarray | None:
+    """Extract and validate previous posterior from persisted decoder state."""
+    if not isinstance(previous_state, dict):
+        return None
+    raw_prev = previous_state.get("posterior")
+    if not isinstance(raw_prev, list) or len(raw_prev) != num_classes:
+        return None
+    candidate = np.asarray(raw_prev, dtype=np.float64)
+    if not np.all(np.isfinite(candidate)):
+        return None
+    candidate_sum = float(np.sum(candidate))
+    if candidate_sum <= 0.0:
+        return None
+    return candidate / candidate_sum
 
 
-def predict_with_artifacts(
-    artifacts: InferenceArtifacts,
-    x_values: np.ndarray,
-    sequence_groups: list[str],
-) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
-    """Run parity inference on window features for live or uploaded sessions.
+def decoder_boundary_gap_ns(
+    previous_state: dict[str, Any] | None,
+    *,
+    current_window_start_ns: int | None,
+) -> int | None:
+    """Return positive boundary gap in ns between previous and current windows, if available."""
+    if not isinstance(previous_state, dict) or current_window_start_ns is None:
+        return None
+    previous_end_ns = previous_state.get("window_end_ns")
+    if not isinstance(previous_end_ns, int):
+        return None
+    gap_ns = int(current_window_start_ns) - int(previous_end_ns)
+    if gap_ns <= 0:
+        return None
+    return gap_ns
 
-    Returns raw argmax predictions, decoded predictions, and refined probabilities.
-    """
-    if artifacts.use_hierarchical:
-        if artifacts.coarse_model is None:
-            raise ValueError("coarse_model is required when use_hierarchical is enabled.")
-        fine_models = artifacts.fine_models or {}
-        y_proba_raw = predict_hierarchical_proba(
-            x_values=x_values,
-            label_order=artifacts.label_order,
-            coarse_model=artifacts.coarse_model,
-            fine_models=fine_models,
-        )
-        static_idx = [
-            idx for idx, label in enumerate(artifacts.label_order)
-            if label in set(artifacts.static_specialist_labels or [])
-        ]
-        gate_scores = np.sum(y_proba_raw[:, static_idx], axis=1) if static_idx else np.zeros(y_proba_raw.shape[0])
-    else:
-        y_proba_raw = np.asarray(artifacts.base_model.predict_proba(x_values), dtype=np.float64)
-        static_idx = [
-            idx for idx, label in enumerate(artifacts.label_order)
-            if label in set(artifacts.static_specialist_labels or [])
-        ]
-        gate_scores = np.sum(y_proba_raw[:, static_idx], axis=1) if static_idx else np.zeros(y_proba_raw.shape[0])
 
-    y_proba_refined = apply_static_specialist_refinement(
-        y_proba=y_proba_raw,
-        x_values=x_values,
-        label_order=artifacts.label_order,
-        static_model=artifacts.static_specialist_model,
-        static_labels=artifacts.static_specialist_labels or [],
-        gate_scores=gate_scores,
-        gate_threshold=artifacts.static_specialist_threshold,
-        blend=artifacts.static_specialist_blend,
+def should_reset_decoder_state(
+    previous_state: dict[str, Any] | None,
+    *,
+    current_window_start_ns: int | None,
+    boundary_gap_seconds: float,
+) -> tuple[bool, float | None]:
+    """Return (should_reset, gap_ms) based on a window gap boundary threshold."""
+    threshold_seconds = max(0.0, float(boundary_gap_seconds))
+    if threshold_seconds <= 0.0:
+        return False, None
+    gap_ns = decoder_boundary_gap_ns(
+        previous_state,
+        current_window_start_ns=current_window_start_ns,
     )
-    y_pred_raw = np.argmax(y_proba_refined, axis=1).astype(np.int32)
-    y_pred = decode_predictions(
-        decoder=artifacts.temporal_decoder,
-        y_pred_raw=y_pred_raw,
-        y_proba_raw=y_proba_refined,
-        sequence_groups=sequence_groups,
-        log_init_probs=artifacts.log_init_probs,
-        log_trans_probs=artifacts.log_trans_probs,
-    )
-    return y_pred_raw, y_pred, y_proba_refined
+    if gap_ns is None:
+        return False, None
+    threshold_ns = int(round(threshold_seconds * 1_000_000_000.0))
+    return gap_ns > threshold_ns, (gap_ns / 1_000_000.0)
+
+
+def resolve_live_decoder_reset_mode(bundle_meta: dict[str, Any]) -> str:
+    """Return supported live decoder reset mode with safe fallback."""
+    raw_mode = bundle_meta.get("live_decoder_reset_mode", "session")
+    mode = str(raw_mode).strip().lower()
+    if mode in {"per-window", "per-gap", "session"}:
+        return mode
+    return "session"
