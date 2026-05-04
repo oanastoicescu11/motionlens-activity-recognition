@@ -30,14 +30,13 @@ class IngestSchemaTests(unittest.TestCase):
         parsed = parse_ingest_batch(_valid_body())
         self.assertEqual(parsed.message_id, 11)
         self.assertEqual(parsed.session_id, "sess-1")
-        self.assertIsNone(parsed.placement_label)
         self.assertEqual(len(parsed.samples), 2)
 
-    def test_parses_optional_placement_label(self) -> None:
+    def test_accepts_optional_placement_label(self) -> None:
         body = _valid_body()
         body["placementLabel"] = "front_pocket"
         parsed = parse_ingest_batch(body)
-        self.assertEqual(parsed.placement_label, "front_pocket")
+        self.assertEqual(parsed.device_id, "dev-1")
 
     def test_parses_optional_gyro_payload(self) -> None:
         body = _valid_body()

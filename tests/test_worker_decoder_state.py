@@ -7,11 +7,7 @@ import unittest
 import numpy as np
 
 from core.inference import InferenceArtifacts, causal_hmm_step
-from core.inference import resolve_live_decoder_reset_mode, should_reset_decoder_state
-
-# Aliases to keep test names stable
-_resolve_live_decoder_reset_mode = resolve_live_decoder_reset_mode
-_should_reset_decoder_state = should_reset_decoder_state
+from core.inference import should_reset_on_low_motion
 
 
 class WorkerDecoderStateTests(unittest.TestCase):
@@ -64,33 +60,20 @@ class WorkerDecoderStateTests(unittest.TestCase):
         # Main index must be argmax of the same probability vector used for reporting.
         self.assertEqual(idx, int(np.argmax(posterior)))
 
-    def test_boundary_reset_triggers_on_large_gap(self) -> None:
-        should_reset, gap_ms = _should_reset_decoder_state(
-            {"window_end_ns": 1_000_000_000},
-            current_window_start_ns=5_500_000_000,
-            boundary_gap_seconds=3.0,
-        )
-        self.assertTrue(should_reset)
-        self.assertIsNotNone(gap_ms)
-        assert gap_ms is not None
-        self.assertGreater(gap_ms, 3000.0)
+    def test_should_reset_on_low_motion_with_locomotion_state(self) -> None:
+        label_order = ["walk", "run", "sit/lay", "stand"]
+        previous_state = {"posterior": [0.50, 0.30, 0.10, 0.10]}
+        self.assertTrue(should_reset_on_low_motion(previous_state, label_order=label_order))
 
-    def test_boundary_reset_does_not_trigger_on_small_gap(self) -> None:
-        should_reset, gap_ms = _should_reset_decoder_state(
-            {"window_end_ns": 1_000_000_000},
-            current_window_start_ns=2_500_000_000,
-            boundary_gap_seconds=3.0,
-        )
-        self.assertFalse(should_reset)
-        self.assertIsNotNone(gap_ms)
+    def test_should_reset_on_low_motion_with_static_state(self) -> None:
+        label_order = ["walk", "run", "sit/lay", "stand"]
+        previous_state = {"posterior": [0.10, 0.10, 0.50, 0.30]}
+        self.assertFalse(should_reset_on_low_motion(previous_state, label_order=label_order))
 
-    def test_reset_mode_defaults_to_session(self) -> None:
-        mode = _resolve_live_decoder_reset_mode({})
-        self.assertEqual(mode, "session")
+    def test_should_reset_on_low_motion_with_no_state(self) -> None:
+        label_order = ["walk", "run", "sit/lay", "stand"]
+        self.assertTrue(should_reset_on_low_motion(None, label_order=label_order))
 
-    def test_reset_mode_invalid_value_falls_back_to_session(self) -> None:
-        mode = _resolve_live_decoder_reset_mode({"live_decoder_reset_mode": "bogus"})
-        self.assertEqual(mode, "session")
 
 if __name__ == "__main__":
     unittest.main()

@@ -45,7 +45,7 @@ class IngestDedupeTests(unittest.TestCase):
         )
         queued = self.store.pop_inference_task()
         self.assertIsNotNone(queued)
-        self.assertEqual(queued["placement_label"], "front_pocket")
+        self.assertNotIn("placement_label", queued)
         self.store.enqueue_inference_task(queued)
         second = process_ingest_batch(
             self.store,

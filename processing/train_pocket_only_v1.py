@@ -1970,8 +1970,6 @@ def main() -> None:
         "window_samples": WINDOW_SAMPLES,
     }
     joblib.dump(inference_bundle, output_dir / "inference_bundle.joblib")
-    # Standalone base model for the worker pipeline (artifacts/model/model_pocket_only.joblib)
-    joblib.dump(model, output_dir / "model_pocket_only.joblib")
 
     with (output_dir / "inference_config.json").open("w", encoding="utf-8") as handle:
         json.dump(
@@ -1993,7 +1991,7 @@ def main() -> None:
             indent=2,
         )
 
-    LOGGER.info("Wrote model and evaluation artifacts to %s", output_dir)
+    LOGGER.info("Wrote training artifacts and runtime bundle to %s", output_dir)
     LOGGER.info("Updated experiment history at %s", args.experiment_log)
 
 

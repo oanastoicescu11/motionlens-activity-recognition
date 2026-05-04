@@ -192,25 +192,23 @@ Model design:
 Final model artifact directory:
 
 ```text
-artifacts/model/
+src/artifacts/model/
 ```
 
-Important files:
+Committed live runtime file:
 
 ```text
-artifacts/model/inference_bundle.joblib
-artifacts/model/inference_config.json
-artifacts/model/transition_stats.npz
-artifacts/model/xgboost_model.joblib
-artifacts/model/metrics.json
-artifacts/model/class_metrics.json
-artifacts/model/per_dataset_metrics.csv
+src/artifacts/model/inference_bundle.joblib
 ```
+
+Training and evaluation outputs belong under `output/...`, not in `src/artifacts/model/`.
+That includes metrics, confusion matrices, feature schema exports, transition stats,
+and any component-model dumps.
 
 Live inference should load:
 
 ```text
-artifacts/model/inference_bundle.joblib
+src/artifacts/model/inference_bundle.joblib
 ```
 
 and call:
@@ -222,10 +220,13 @@ predict_with_artifacts(...)
 from:
 
 ```text
-core/inference/motionlens_inference.py
+src/core/inference/motionlens_inference.py
 ```
 
 Live inference does **not** re-estimate transition probabilities. It uses the saved `log_init_probs` and `log_trans_probs` from the trained artifact bundle.
+
+For deployment, the app expects the bundled runtime artifact to be present. It does not
+fall back to a secondary raw-model file.
 
 ## Current model metrics
 
@@ -257,23 +258,21 @@ High-level structure:
 
 ```text
 .
-├── app/                         # Live backend, worker, and UI
-├── core/                        # Shared preprocessing, features, inference, guards
+├── src/app/                     # Live backend, worker, and UI
+├── src/core/                    # Shared preprocessing, features, inference, guards
 ├── processing/                  # Offline dataset contract + model training
-├── artifacts/model/             # Current trained runtime model bundle
+├── src/artifacts/model/         # Current trained runtime model bundle
 ├── output/motionlens_contract/  # Canonical training contract outputs
 ├── tests/                       # Unit and integration tests
-├── create_session.py            # Helper to create live session credentials
-├── quickstart.py                # Helper for LAN IP/setup hints
 └── run_worker.py                # Worker entrypoint
 ```
 
 ## App architecture
 
-The `app/` folder contains the live inference backend and UI. After the app refactor, the worker pipeline is split into smaller step, guard, decoding, and serialization modules instead of a single large monolithic pipeline function.
+The `src/app/` folder contains the live inference backend and UI. After the app refactor, the worker pipeline is split into smaller step, guard, decoding, and serialization modules instead of a single large monolithic pipeline function.
 
 ```text
-app/
+src/app/
 ├── __init__.py
 ├── insights.py
 ├── backend/
@@ -400,6 +399,12 @@ Activate the virtual environment first:
 .venv\Scripts\activate
 ```
 
+Install the project once in editable mode so `app` and `core` resolve from `src/`:
+
+```powershell
+.venv\Scripts\python.exe -m pip install -e .
+```
+
 ### Option 1: backend only
 
 Use this for ingest/API testing without the dashboard.
@@ -411,7 +416,7 @@ Use this for ingest/API testing without the dashboard.
 Create a session:
 
 ```powershell
-.venv\Scripts\python.exe create_session.py
+.venv\Scripts\python.exe -c "import requests; r = requests.post('http://localhost:8000/v1/sessions/start', params={'owner_id':'local-dev','mode':'desktop','ttl_seconds':300,'join_ttl_seconds':90}, timeout=10); r.raise_for_status(); print(r.json())"
 ```
 
 Read signal data:
@@ -433,7 +438,7 @@ Terminal 1:
 Terminal 2:
 
 ```powershell
-.venv\Scripts\python.exe -m streamlit run app/ui/streamlit_app.py
+.venv\Scripts\python.exe -m streamlit run src/app/ui/streamlit_app.py
 ```
 
 Then open:
@@ -464,7 +469,7 @@ Terminal 2:
 Terminal 3:
 
 ```powershell
-.venv\Scripts\python.exe -m streamlit run app/ui/streamlit_app.py
+.venv\Scripts\python.exe -m streamlit run src/app/ui/streamlit_app.py
 ```
 
 If using Redis, make sure a Redis server is running and the Python `redis` package is installed.
@@ -472,7 +477,7 @@ If using Redis, make sure a Redis server is running and the Python `redis` packa
 ## Phone setup notes
 
 - Phone and computer must be on the same local network.
-- Use `quickstart.py` or `ipconfig` to find the computer LAN IP.
+- Use `ipconfig` to find the computer LAN IP.
 - iOS/Safari-style motion access may require an explicit user tap.
 - Some browsers require secure-context behavior for motion/orientation permission APIs.
 - Local development may allow insecure local exceptions depending on browser and backend settings.
@@ -481,8 +486,6 @@ If using Redis, make sure a Redis server is running and the Python `redis` packa
 Useful helper scripts:
 
 ```text
-quickstart.py       # prints local IP/setup hints
-create_session.py   # creates session credentials
 run_worker.py       # starts worker process
 ```
 
@@ -543,13 +546,13 @@ output/motionlens_contract/
 Training output:
 
 ```text
-artifacts/model/
+src/artifacts/model/
 ```
 
 Current runtime artifact path:
 
 ```text
-artifacts/model/inference_bundle.joblib
+src/artifacts/model/inference_bundle.joblib
 ```
 
 ## Development rules

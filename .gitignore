@@ -1,6 +1,8 @@
 /analyses
-/.github/skills
-/.vscode
+.github/skills/
+.github/agents/
+.roo
+.vscode
 /data
 /output
 /.continue
@@ -10,6 +12,11 @@
 __pycache__/
 *.py[codz]
 *$py.class
+*.code-workspace
+src\wearable_simulator.egg-info
+# Deployment runtime artifact: keep only the bundled live model in-repo.
+/src/artifacts/model/*
+!/src/artifacts/model/inference_bundle.joblib
 
 # C extensions
 *.so

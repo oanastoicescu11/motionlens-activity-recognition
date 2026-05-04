@@ -19,6 +19,7 @@ from core.inference.guards import (
     apply_overconfident_stairs_failsafe as _apply_overconfident_stairs_failsafe,
     apply_stairs_moving_window_guard as _apply_stairs_moving_window_guard,
     apply_stairs_static_guard as _apply_stairs_static_guard,
+    apply_locomotion_transitions_guard as _apply_locomotion_transitions_guard,
 )
 from core.inference.artifact_scoring import compute_loose_pocket_artifact_score as _compute_loose_pocket_artifact_score
 from core.features import window_feature_names
@@ -471,6 +472,71 @@ class LowMotionGateTests(unittest.TestCase):
         )
         self.assertTrue(fired)
         self.assertGreater(float(gated[_LABEL_ORDER.index("sit")]), float(gated[_LABEL_ORDER.index("lay")]))
+
+    def test_locomotion_transitions_guard_skips_when_previous_state_is_static(self) -> None:
+        """When coming from static, high-energy transitions should NOT be demoted."""
+        feature_row = _make_feature_row(body_mag_energy=10.0)
+        emission = np.zeros(len(_LABEL_ORDER), dtype=np.float64)
+        emission[_LABEL_ORDER.index("transitions")] = 0.90
+        emission[_LABEL_ORDER.index("walk")] = 0.10
+
+        previous_state = {
+            "posterior": [0.02, 0.02, 0.02, 0.02, 0.45, 0.02, 0.02, 0.02],
+            "window_end_ns": 1,
+        }
+
+        out, applied, reason = _apply_locomotion_transitions_guard(
+            feature_row=feature_row,
+            emission=emission,
+            label_order=_LABEL_ORDER,
+            placement_labels=_PLACEMENT_LABELS,
+            previous_state=previous_state,
+        )
+        self.assertFalse(applied)
+        self.assertEqual(reason, "none")
+        np.testing.assert_array_almost_equal(out, emission)
+
+    def test_locomotion_transitions_guard_applies_when_previous_state_is_locomotion(self) -> None:
+        """When coming from locomotion, high-energy transitions SHOULD be demoted."""
+        feature_row = _make_feature_row(body_mag_energy=10.0)
+        emission = np.zeros(len(_LABEL_ORDER), dtype=np.float64)
+        emission[_LABEL_ORDER.index("transitions")] = 0.90
+        emission[_LABEL_ORDER.index("walk")] = 0.10
+
+        previous_state = {
+            "posterior": [0.70, 0.10, 0.05, 0.05, 0.05, 0.02, 0.02, 0.01],
+            "window_end_ns": 1,
+        }
+
+        out, applied, reason = _apply_locomotion_transitions_guard(
+            feature_row=feature_row,
+            emission=emission,
+            label_order=_LABEL_ORDER,
+            placement_labels=_PLACEMENT_LABELS,
+            previous_state=previous_state,
+        )
+        self.assertTrue(applied)
+        self.assertIn("transitions-to-walk-high-energy", reason)
+        self.assertLess(float(out[_LABEL_ORDER.index("transitions")]), float(emission[_LABEL_ORDER.index("transitions")]))
+        self.assertGreater(float(out[_LABEL_ORDER.index("walk")]), float(emission[_LABEL_ORDER.index("walk")]))
+
+    def test_pocket_sanity_correction_demotes_stairs_to_walk_for_walking_cadence(self) -> None:
+        proba = np.zeros(len(_LABEL_ORDER), dtype=np.float64)
+        proba[_LABEL_ORDER.index("stairs")] = 0.72
+        proba[_LABEL_ORDER.index("walk")] = 0.20
+        proba[_LABEL_ORDER.index("run")] = 0.08
+
+        out, corrected, reason = _apply_pocket_activity_sanity_correction(
+            proba,
+            label_order=_LABEL_ORDER,
+            placement_label="front_pocket",
+            cadence_spm=110.0,
+            periodicity_strength=0.65,
+            artifact_score=1.9,
+        )
+        self.assertTrue(corrected)
+        self.assertEqual(reason, "stairs-to-walk-walking-cadence")
+        self.assertEqual(_LABEL_ORDER[int(np.argmax(out))], "walk")
 
 
 if __name__ == "__main__":
