@@ -5,9 +5,11 @@ from __future__ import annotations
 import datetime
 import io
 import json
-import socket
+from urllib.parse import urlencode
 
 import requests
+
+from app.backend.config import settings
 
 try:
     import streamlit as st
@@ -23,8 +25,6 @@ except Exception:  # pragma: no cover
     components = None
     HAS_QRCODE = False
 
-
-BACKEND_BASE_URL = "http://localhost:8000"
 AUTO_REFRESH_SECONDS = 0.35
 MIN_AUTO_REFRESH_SECONDS = 0.2
 MAX_AUTO_REFRESH_SECONDS = 2.0
@@ -47,16 +47,20 @@ def _drain_worker_once() -> None:
     pass
 
 
-def _get_local_ip() -> str:
-    """Get the local IP address visible to other devices on the network."""
-    try:
-        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        s.connect(("8.8.8.8", 80))
-        ip = s.getsockname()[0]
-        s.close()
-        return ip
-    except Exception:
-        return "127.0.0.1"
+def _backend_api_url(path: str, *, base_url: str | None = None) -> str:
+    """Build one backend API URL from the configured backend base URL."""
+
+    effective_base_url = (base_url or settings.backend_base_url).rstrip("/")
+    normalized_path = path if path.startswith("/") else f"/{path}"
+    return f"{effective_base_url}{normalized_path}"
+
+
+def _build_mobile_join_url(join_token: str, *, public_backend_url: str | None = None) -> str:
+    """Build the public mobile capture URL used in the QR code and phone redirect."""
+
+    effective_public_url = (public_backend_url or settings.public_backend_url).rstrip("/")
+    query = urlencode({"join_token": join_token})
+    return f"{effective_public_url}/mobile-capture?{query}"
 
 
 def _generate_qr_code(text: str) -> bytes | None:
@@ -126,7 +130,7 @@ def _create_session() -> dict | None:
     """Create a desktop bootstrap session via FastAPI backend."""
     try:
         response = requests.post(
-            f"{BACKEND_BASE_URL}/v1/sessions/start",
+            _backend_api_url("/v1/sessions/start"),
             params={
                 "owner_id": "streamlit-ui",
                 "mode": "desktop",
@@ -155,7 +159,7 @@ def _fetch_json(
 
 def _load_session_summary(session_id: str, viewer_token: str) -> dict | None:
     """Fetch the finalized session summary when one exists."""
-    summary_url = f"{BACKEND_BASE_URL}/v1/sessions/{session_id}/summary"
+    summary_url = _backend_api_url(f"/v1/sessions/{session_id}/summary")
     try:
         response = _fetch_json(summary_url, headers={"X-Viewer-Token": viewer_token})
     except Exception:
@@ -549,7 +553,6 @@ def main() -> None:
     # Initialize session state
     if "session_data" not in st.session_state:
         st.session_state.session_data = None
-        st.session_state.local_ip = _get_local_ip()
         st.session_state.capture_started = False
         st.session_state.summary_available = False
         st.session_state.live_refresh_seconds = AUTO_REFRESH_SECONDS
@@ -562,21 +565,17 @@ def main() -> None:
             st.session_state.session_data = session_data
             st.rerun()
         else:
-            st.error("Failed to create session. Is backend running on localhost:8000?")
+            st.error(f"Failed to create session. Is the backend running at {settings.backend_base_url}?")
             return
 
     session_data = st.session_state.session_data
     session_id = session_data["session_id"]
     viewer_token = session_data["viewer_token"]
     join_token = session_data["join_token"]
-    local_ip = st.session_state.local_ip
-    mobile_join_url = (
-        f"http://{local_ip}:8000/mobile-capture"
-        f"?join_token={join_token}"
-    )
+    mobile_join_url = _build_mobile_join_url(join_token)
 
-    signal_url = f"{BACKEND_BASE_URL}/v1/sessions/{session_id}/signal"
-    inference_url = f"{BACKEND_BASE_URL}/v1/sessions/{session_id}/inference"
+    signal_url = _backend_api_url(f"/v1/sessions/{session_id}/signal")
+    inference_url = _backend_api_url(f"/v1/sessions/{session_id}/inference")
 
     summary = _load_session_summary(session_id, viewer_token)
     if summary is not None:

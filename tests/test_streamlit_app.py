@@ -1,4 +1,9 @@
-from app.ui.streamlit_app import _is_mobile_user_agent, _should_auto_open_mobile_capture
+from app.ui.streamlit_app import (
+    _backend_api_url,
+    _build_mobile_join_url,
+    _is_mobile_user_agent,
+    _should_auto_open_mobile_capture,
+)
 
 
 def test_is_mobile_user_agent_matches_phone_browsers() -> None:
@@ -21,3 +26,15 @@ def test_auto_open_mobile_capture_requires_phone_and_setup_state() -> None:
     assert _should_auto_open_mobile_capture(prefer_direct_mobile_join=True, show_phone_setup=True)
     assert not _should_auto_open_mobile_capture(prefer_direct_mobile_join=False, show_phone_setup=True)
     assert not _should_auto_open_mobile_capture(prefer_direct_mobile_join=True, show_phone_setup=False)
+
+
+def test_backend_api_url_uses_configured_base_url() -> None:
+    assert _backend_api_url("/v1/sessions/start", base_url="https://api.example.com/") == (
+        "https://api.example.com/v1/sessions/start"
+    )
+
+
+def test_build_mobile_join_url_uses_public_backend_url() -> None:
+    assert _build_mobile_join_url("join-token-123", public_backend_url="https://live.example.com/") == (
+        "https://live.example.com/mobile-capture?join_token=join-token-123"
+    )

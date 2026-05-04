@@ -1,0 +1,11 @@
+# Direct dependencies for offline data preparation and model training under processing/.
+
+joblib==1.5.3
+numpy==2.4.4
+optuna==4.8.0
+pandas==3.0.2
+pyarrow==24.0.0
+PyWavelets==1.9.0
+scikit-learn==1.8.0
+scipy==1.17.1
+xgboost==3.2.0

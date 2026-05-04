@@ -3,9 +3,9 @@
 from __future__ import annotations
 
 import multiprocessing as mp
-import os
 import time
 
+from app.backend.config import settings
 from app.backend.storage import get_runtime_store
 from app.worker.consumer import consume_once
 
@@ -34,11 +34,7 @@ def start_workers(num_workers: int = 2, poll_seconds: float = DEFAULT_WORKER_POL
 
 def worker_poll_seconds_from_env(default: float = DEFAULT_WORKER_POLL_SECONDS) -> float:
     """Read worker poll cadence from environment with a safe lower bound."""
-    raw = os.getenv("MLIVE_WORKER_POLL_SECONDS")
-    if raw is None:
-        return float(default)
-    try:
-        value = float(raw)
-    except (TypeError, ValueError):
-        return float(default)
-    return max(0.01, value)
+    configured = settings.worker_poll_seconds
+    if configured > 0.0:
+        return max(0.01, configured)
+    return max(0.01, float(default))
