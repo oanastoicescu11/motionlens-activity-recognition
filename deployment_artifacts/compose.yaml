@@ -15,6 +15,8 @@ services:
     restart: unless-stopped
     env_file:
       - ./.env.production
+    environment:
+      MLIVE_ALLOW_INSECURE_LOCAL: "1"
     command: >
       python -m uvicorn app.backend.main:app
       --host 0.0.0.0

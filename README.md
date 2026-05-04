@@ -1,10 +1,8 @@
 # MotionLens
 
-MotionLens is an interpretable accelerometer signal-intelligence pipeline and live web app. It analyzes smartphone accelerometer data from uploaded CSVs or live browser `DeviceMotion` capture and produces activity, segmentation, cadence, intensity, gravity/body separation, and signal-quality outputs.
+MotionLens is a pocket-phone accelerometer activity-analysis app. It accepts uploaded 3-axis CSV files or live browser `DeviceMotion` streams, normalizes them to a shared 50 Hz contract, separates gravity from body motion, extracts engineered window features, runs XGBoost with guard logic and causal HMM decoding, and serves the results through a FastAPI backend and Streamlit dashboard.
 
-The current model and evidence scope are **smartphone pocket carry only**. Training uses front-pocket phone datasets plus lateral side-hip iPhone recordings. MotionLens is ACC-first: timestamp plus 3-axis acceleration is the only required input. Optional browser/device signals such as gravity, user acceleration, rotation rate, gyroscope, orientation, magnetometer, or GPS may be used when available, but the app must continue working without them.
-
-MotionLens is not a medical device. It does not make clinical or diagnostic claims. Breathing output is only a low-confidence quiet-window proxy, and placement quality is a coarse signal-quality guide, not anatomical placement classification.
+MotionLens is ACC-first: timestamp plus `acc_x`, `acc_y`, and `acc_z` are enough to run the pipeline. The current training and interpretation scope is smartphone pocket carry.
 
 ## What MotionLens does
 
@@ -30,47 +28,13 @@ Current activity labels:
 - `transitions`
 - `locomotion-other`
 
-The main user-facing labels are `walk`, `run`, `stairs`, `sit/lay`, and `stand`. `transitions` and `locomotion-other` are useful for robustness and should be presented carefully.
+Runtime predictions are emitted over the seven labels above.
 
-## Current scope
+## Data scope
 
-### In scope
+MotionLens is trained and evaluated on pocket-phone recordings from these sources:
 
-- Smartphone pocket carry
-- Front pants/trouser/jeans pocket recordings
-- Lateral side-hip iPhone recordings
-- Uploaded raw 3-axis accelerometer CSVs
-- Live browser `DeviceMotion` capture
-- ACC-only fallback behavior
-- Interpretable signal-processing outputs
-- Per-dataset accuracy reporting
-- Local development with FastAPI, Streamlit, and optional Redis-backed worker mode
-
-### Out of scope
-
-- Medical or clinical diagnosis
-- Clinical respiratory monitoring
-- Dense anatomical placement inference
-- Wrist, chest, waist, back, ankle, or arbitrary free-living carry as training targets
-- One global deployment accuracy number
-- Energy expenditure or calorie claims
-- User-facing model retraining in the MVP
-
-## Evidence-backed data scope
-
-The current pocket-only model keeps only these placement labels:
-
-| Label | Meaning |
-|---|---|
-| `front_pocket` | Phone in front pants/trouser/jeans pocket |
-| `lateral_left_lower` | Left lateral side-hip iPhone sweep |
-| `lateral_right_lower` | Right lateral side-hip iPhone sweep |
-
-These placement labels are metadata for dataset filtering and interpretation. The current trained model does **not** use placement one-hot features.
-
-Training datasets:
-
-| Dataset | Placement used | Hz | Role | Citation |
+| Dataset | Carry position | Hz | Role | Citation |
 |---|---:|---:|---|---|
 | WISDM | front pants-leg pocket | 20 → 50 | Controlled pocket HAR baseline | [D1] |
 | MotionSense | trousers front pocket | 50 | Closest public iPhone/Core Motion proxy | [D2] |
@@ -83,19 +47,7 @@ Training datasets:
 | UT Complex | smartphone at pocket | 50 | Complex activity subset | [D8], [D9] |
 | iPhone Placement Sweep | lateral left/right lower only | ~100 → 50 | Local lateral side-hip calibration | repo-local capture |
 
-Excluded from training:
-
-- UCI/HAPT
-- HHAR
-- Real-Life HAR
-- HARTH
-- WARD
-- WoW
-- EmoWear
-- PhysioNet/Wearable
-- chest, waist, wrist, ankle, back, and other non-pocket streams
-
-Some excluded datasets remain useful as analysis/reference evidence, but they are not part of the current pocket-only training pool.
+Each source is normalized into the same accelerometer contract before feature extraction, training, and live inference.
 
 ## Signal-processing contract
 
@@ -183,52 +135,23 @@ Model design:
 
 - XGBoost multiclass classifier
 - 128-sample windows at 50 Hz
-- No placement one-hot features: `PLACEMENT_LABELS = []`
+- 151 engineered features per window
 - Subject-level holdout per dataset where possible
-- Temporal decoding options: `none` and `causal-hmm`
+- Causal HMM temporal decoding
 - Static specialist/refinement for difficult static posture cases
 - Final runtime bundle serialized with `joblib`
 
-Deployment runtime bundle directory:
-
-```text
-src/artifacts/model/
-```
-
-Committed live runtime file:
+Live runtime bundle:
 
 ```text
 src/artifacts/model/inference_bundle.joblib
 ```
 
-The live app does not call a standalone `predict_with_artifacts(...)` helper. The
-worker loads `src/artifacts/model/inference_bundle.joblib` in
-`src/app/worker/_steps.py` and runs live inference through `src/app/worker/pipeline.py`.
-
-Training and evaluation artifacts belong under `output/...`, not in `src/artifacts/model/`.
-That includes metrics, confusion matrices, feature schemas, transition stats, and
-component-model dumps. The runtime bundle is the only artifact expected under
-`src/artifacts/model/` for deployment.
-
-Live inference loads:
-
-```text
-src/artifacts/model/inference_bundle.joblib
-```
-
-Live inference does **not** re-estimate transition probabilities. It uses the saved `log_init_probs` and `log_trans_probs` from the trained artifact bundle.
-
-For deployment, the app expects the bundled runtime artifact to be present. It does not
-fall back to a secondary raw-model file.
+Training runs write metrics, feature schemas, confusion matrices, and transition statistics under `output/...`. The worker loads the committed runtime bundle in `src/app/worker/_steps.py` and runs the live inference flow in `src/app/worker/pipeline.py`.
 
 ## Current model metrics
 
-The repo currently contains two model states:
-
-- Deployed runtime bundle: `src/artifacts/model/inference_bundle.joblib`
-- Latest evaluated pocket-only training run: `output/model_pocket_ultra_tuned/`
-
-Latest evaluated run metrics (`output/model_pocket_ultra_tuned/metrics.json`):
+Latest evaluated pocket-only run metrics (`output/model_pocket_ultra_tuned/metrics.json`):
 
 | Metric | Value |
 |---|---:|
@@ -250,8 +173,6 @@ Per-dataset decoded accuracy (`output/model_pocket_ultra_tuned/per_dataset_metri
 | WISDM | 0.9240 |
 | WISDM v2 | 0.8591 |
 
-Do not report a single deployment-wide accuracy claim without context. Controlled datasets, heterogeneous devices, and live browser capture differ substantially.
-
 ## Repository structure
 
 High-level structure:
@@ -269,57 +190,15 @@ High-level structure:
 
 ## App architecture
 
-The `src/app/` folder contains the live inference backend and UI. After the app refactor, the worker pipeline is split into smaller step, guard, decoding, and serialization modules instead of a single large monolithic pipeline function.
+The `src/app/` folder contains the live backend, mobile capture page, worker, and dashboard.
 
 ```text
 src/app/
-├── __init__.py
-├── insights.py
-├── backend/
-│   ├── __init__.py
-│   ├── main.py
-│   ├── ingest_routes.py
-│   ├── session_routes.py
-│   ├── mobile_capture_page.py
-│   ├── api/
-│   │   ├── __init__.py
-│   │   ├── dependencies.py
-│   │   └── routes/
-│   │       ├── __init__.py
-│   │       ├── health.py
-│   │       ├── ingest.py
-│   │       ├── mobile.py
-│   │       └── sessions.py
-│   ├── config/
-│   │   ├── __init__.py
-│   │   └── settings.py
-│   ├── core/
-│   │   ├── __init__.py
-│   │   ├── auth.py
-│   │   ├── exceptions.py
-│   │   ├── ingest_parser.py
-│   │   └── security.py
-│   ├── models/
-│   │   ├── __init__.py
-│   │   ├── ingest.py
-│   │   ├── protocols.py
-│   │   └── session.py
-│   └── storage/
-│       ├── __init__.py
-│       ├── memory.py
-│       └── redis_impl.py
-├── ui/
-│   ├── __init__.py
-│   └── streamlit_app.py
-└── worker/
-    ├── __init__.py
-    ├── consumer.py
-    ├── main.py
-    ├── pipeline.py
-    ├── _steps.py
-    ├── _guards.py
-    ├── _decoding.py
-    └── _serialization.py
+├── backend/     # FastAPI app, routes, mobile capture page, runtime settings, storage
+├── worker/      # queue consumer, feature/inference steps, guards, decoding, serialization
+├── ui/          # Streamlit dashboard
+├── insights.py  # UI-facing live metrics
+└── __init__.py
 ```
 
 Main components:
@@ -393,51 +272,23 @@ Security model:
 
 Use Windows PowerShell from the repository root.
 
-Activate the virtual environment first:
+### 1. Install the project
 
 ```powershell
+Copy-Item .env.example .env
 .venv\Scripts\activate
-```
-
-Install the project once in editable mode so `app` and `core` resolve from `src/`:
-
-```powershell
 .venv\Scripts\python.exe -m pip install -e .
 ```
 
-For plain local `http://localhost` development, either copy `.env.example` to `.env`
-or set `MLIVE_ALLOW_INSECURE_LOCAL=1` before starting the backend. Otherwise the
-backend rejects requests with `HTTPS is required.`
+### 2. Quick local run
 
-### Option 1: backend only
-
-Use this for ingest/API testing without the dashboard.
-
-```powershell
-$env:MLIVE_ALLOW_INSECURE_LOCAL="1"
-.venv\Scripts\python.exe -m uvicorn app.backend.main:app --host 0.0.0.0 --port 8000
-```
-
-Create a session:
-
-```powershell
-.venv\Scripts\python.exe -c "import requests; r = requests.post('http://localhost:8000/v1/sessions/start', params={'owner_id':'local-dev','mode':'desktop','ttl_seconds':300,'join_ttl_seconds':90}, timeout=10); r.raise_for_status(); print(r.json())"
-```
-
-Read signal data:
-
-```powershell
-Invoke-RestMethod -Headers @{ "X-Viewer-Token" = "<VIEWER_TOKEN>" } -Uri "http://localhost:8000/v1/sessions/<SESSION_ID>/signal"
-```
-
-### Option 2: backend + Streamlit UI
-
-Recommended for local live testing.
+Use this mode for the simplest backend + UI setup. In memory mode the backend starts the inference worker inline.
 
 Terminal 1:
 
 ```powershell
 $env:MLIVE_ALLOW_INSECURE_LOCAL="1"
+$env:MLIVE_STORE_BACKEND="memory"
 .venv\Scripts\python.exe -m uvicorn app.backend.main:app --host 0.0.0.0 --port 8000
 ```
 
@@ -449,19 +300,23 @@ $env:MLIVE_PUBLIC_BACKEND_URL="http://<LAN-IP>:8000"
 .venv\Scripts\python.exe -m streamlit run src/app/ui/streamlit_app.py
 ```
 
-Then open:
+Open:
 
 ```text
 http://localhost:8501
 ```
 
-Scan the QR code with your phone, tap Start Analysis, and keep the phone and computer on the same network.
+### 3. Local Redis + dedicated worker
 
-### Option 3: full stack with Redis
+Use this mode when you want the backend and worker in separate processes.
 
-Use this when testing a production-like backend + worker + UI setup.
+Start Redis in Docker:
 
-Terminal 1:
+```powershell
+docker run --name motionlens-redis --rm -p 6379:6379 redis:7-alpine
+```
+
+Backend terminal:
 
 ```powershell
 $env:MLIVE_ALLOW_INSECURE_LOCAL="1"
@@ -471,16 +326,16 @@ $env:MLIVE_REDIS_PREFIX="mlive"
 .venv\Scripts\python.exe -m uvicorn app.backend.main:app --host 0.0.0.0 --port 8000
 ```
 
-Terminal 2:
+Worker terminal:
 
 ```powershell
 $env:MLIVE_STORE_BACKEND="redis"
 $env:MLIVE_REDIS_URL="redis://localhost:6379/0"
 $env:MLIVE_REDIS_PREFIX="mlive"
-.venv\Scripts\python.exe run_worker.py --store-backend redis
+.venv\Scripts\python.exe run_worker.py --workers 1 --store-backend redis
 ```
 
-Terminal 3:
+Streamlit terminal:
 
 ```powershell
 $env:MLIVE_BACKEND_BASE_URL="http://localhost:8000"
@@ -488,22 +343,84 @@ $env:MLIVE_PUBLIC_BACKEND_URL="http://<LAN-IP>:8000"
 .venv\Scripts\python.exe -m streamlit run src/app/ui/streamlit_app.py
 ```
 
-If using Redis, make sure a Redis server is running and the Python `redis` package is installed.
+### 4. Phone and browser notes
 
-## Phone setup notes
+- Live phone capture in this repo has been tested with Chrome on the phone.
+- Keep the phone and computer on the same network when you use a LAN URL.
+- Set `MLIVE_PUBLIC_BACKEND_URL` to the backend address the phone can actually open.
+- Android/Chrome can use `http://<LAN-IP>:8000`.
+- iPhone requires HTTPS and a user tap to grant motion permission.
 
-- Phone and computer must be on the same local network.
-- Use `ipconfig` to find the computer LAN IP.
-- iOS/Safari-style motion access may require an explicit user tap.
-- Some browsers require secure-context behavior for motion/orientation permission APIs.
-- Local development may allow insecure local exceptions depending on browser and backend settings.
-- If capture does not start, check browser permissions, network reachability, and backend logs.
+For iPhone live capture, run an HTTPS tunnel to the backend:
+
+```powershell
+ngrok http 8000
+```
+
+Then set the public backend URL to the HTTPS ngrok address before starting Streamlit:
+
+```powershell
+$env:MLIVE_PUBLIC_BACKEND_URL="https://<your-ngrok-domain>"
+```
+
+The dashboard QR code uses `MLIVE_PUBLIC_BACKEND_URL` to build the phone capture link.
 
 Useful helper scripts:
 
 ```text
 run_worker.py       # starts worker process
 ```
+
+## Deployment
+
+The production stack lives under `deployment_artifacts/` and runs five services:
+
+- Caddy for HTTPS and reverse proxy
+- Streamlit for the dashboard
+- FastAPI for the backend API
+- Worker for inference jobs
+- Redis for shared queue and session state
+
+### Docker Compose deployment
+
+1. Copy the production environment template:
+
+```powershell
+Copy-Item deployment_artifacts/.env.production.example deployment_artifacts/.env.production
+```
+
+2. Edit `deployment_artifacts/.env.production` and set at least:
+
+- `ML_HOST`
+- `MLIVE_PUBLIC_BACKEND_URL`
+
+3. Build and start the stack:
+
+```powershell
+docker compose -f deployment_artifacts/compose.yaml build --pull backend worker streamlit
+docker compose -f deployment_artifacts/compose.yaml up -d
+docker compose -f deployment_artifacts/compose.yaml ps
+```
+
+4. Open `https://<ML_HOST>` after DNS and certificates are ready.
+
+### Ubuntu VM helper script
+
+For a single Ubuntu VM, the repo includes `deployment_artifacts/scripts/deploy_vm.sh`.
+
+With DuckDNS:
+
+```bash
+ML_HOST=motionlens.duckdns.org DUCKDNS_DOMAIN=motionlens DUCKDNS_TOKEN=<duckdns-token> bash deployment_artifacts/scripts/deploy_vm.sh
+```
+
+With your own DNS:
+
+```bash
+ML_HOST=your.domain.example bash deployment_artifacts/scripts/deploy_vm.sh
+```
+
+The script installs Docker if needed, writes `deployment_artifacts/.env.production`, builds the images, and starts Caddy, Redis, the backend, the worker, and Streamlit.
 
 ## Testing
 

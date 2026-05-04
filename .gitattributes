@@ -1,0 +1,2 @@
+*.sh text eol=lf
+deployment_artifacts/** text eol=lf

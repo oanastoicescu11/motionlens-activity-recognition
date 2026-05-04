@@ -28,8 +28,19 @@ if [[ ! -f "$ARTIFACTS_DIR/compose.yaml" || ! -f "$ARTIFACTS_DIR/Dockerfile" || 
     exit 1
 fi
 
-if ! command -v docker >/dev/null 2>&1 || ! docker compose version >/dev/null 2>&1; then
-    log "Docker is missing; installing Docker Engine and the Compose plugin."
+if ! command -v sudo >/dev/null 2>&1; then
+    echo "This script requires sudo on the VM for Docker setup and optional DuckDNS configuration." >&2
+    exit 1
+fi
+
+if ! sudo -n true >/dev/null 2>&1; then
+    echo "This script requires passwordless sudo for the current VM user." >&2
+    echo "Grant NOPASSWD sudo or run the setup steps as a user that can sudo non-interactively." >&2
+    exit 1
+fi
+
+if ! command -v docker >/dev/null 2>&1 || ! docker compose version >/dev/null 2>&1 || ! id -nG "$USER" | grep -qw docker; then
+    log "Ensuring Docker, Compose, and docker-group access are configured for the current user."
     "$ARTIFACTS_DIR/scripts/install_docker_ubuntu.sh"
 fi
 
