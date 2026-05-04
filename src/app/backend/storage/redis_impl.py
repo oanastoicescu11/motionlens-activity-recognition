@@ -7,6 +7,7 @@ import logging
 import time
 from typing import Any, Mapping
 
+from ..config import settings
 from ..models.session import SessionMeta
 
 try:
@@ -43,25 +44,19 @@ class RedisStore:
                 "Redis backend requested but 'redis' package is not installed. "
                 "Install with: pip install redis"
             )
-        import os
-        redis_url = os.getenv("MLIVE_REDIS_URL", "redis://localhost:6379/0")
-        key_prefix = os.getenv("MLIVE_REDIS_PREFIX", "mlive")
-        max_raw_points = int(os.getenv("MLIVE_MAX_RAW_POINTS", "6000"))
-        max_queue_tasks = int(os.getenv("MLIVE_MAX_QUEUE_TASKS", "2000"))
-        max_history_entries = int(os.getenv("MLIVE_MAX_HISTORY_ENTRIES", "2000"))
 
-        client = _redis_module.Redis.from_url(redis_url, decode_responses=True)
+        client = _redis_module.Redis.from_url(settings.redis_url, decode_responses=True)
         try:
             client.ping()
         except Exception as exc:
-            raise RuntimeError(f"Unable to connect to Redis at {redis_url}: {exc}") from exc
+            raise RuntimeError(f"Unable to connect to Redis at {settings.redis_url}: {exc}") from exc
 
         return cls(
             client=client,
-            key_prefix=key_prefix,
-            max_raw_points=max_raw_points,
-            max_queue_tasks=max_queue_tasks,
-            max_history_entries=max_history_entries,
+            key_prefix=settings.redis_prefix,
+            max_raw_points=settings.max_raw_points,
+            max_queue_tasks=settings.max_queue_tasks,
+            max_history_entries=settings.max_history_entries,
         )
 
     # ------------------------------------------------------------------
