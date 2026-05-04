@@ -422,6 +422,58 @@ ML_HOST=your.domain.example bash deployment_artifacts/scripts/deploy_vm.sh
 
 The script installs Docker if needed, writes `deployment_artifacts/.env.production`, builds the images, and starts Caddy, Redis, the backend, the worker, and Streamlit.
 
+### Updating an existing VM deployment
+
+For normal app updates:
+
+1. Push your local changes.
+2. In Cloud Shell, refresh the Cloud Shell checkout.
+3. Copy that refreshed checkout to the VM and rerun the deploy helper.
+
+```bash
+cd ~/wearable-simulator && \
+git pull --ff-only && \
+gcloud compute ssh motionlens-vm --zone us-central1-a --command 'rm -rf "$HOME/wearable-simulator"' && \
+gcloud compute scp --recurse ~/wearable-simulator motionlens-vm:~/ --zone us-central1-a && \
+gcloud compute ssh motionlens-vm --zone us-central1-a --command 'cd "$HOME/wearable-simulator" && ML_HOST=motionlens.duckdns.org DUCKDNS_DOMAIN=motionlens DUCKDNS_TOKEN=<duckdns-token> bash deployment_artifacts/scripts/deploy_vm.sh'
+```
+
+If you force-pushed rewritten history, replace `git pull --ff-only` with:
+
+```bash
+git fetch origin && git reset --hard origin/main && git clean -fd
+```
+
+### Clean redeploy
+
+Use this only when the VM is in a bad state, old containers are hanging around, or ports `80` and `443` may still be occupied by an older MotionLens stack.
+
+```bash
+cd ~/wearable-simulator && \
+git fetch origin && git reset --hard origin/main && git clean -fd && \
+gcloud compute ssh motionlens-vm --zone us-central1-a --command '
+set -euo pipefail
+if [ -d "$HOME/wearable-simulator/deployment_artifacts" ]; then
+	sudo docker compose -f "$HOME/wearable-simulator/deployment_artifacts/compose.yaml" down -v --remove-orphans || true
+fi
+if sudo ss -ltnp | grep -E ":(80|443)\\b" >/dev/null; then
+	echo "Ports 80/443 are still in use after stopping the old MotionLens stack:"
+	sudo ss -ltnp | grep -E ":(80|443)\\b" || true
+	exit 1
+fi
+rm -rf "$HOME/wearable-simulator"
+' && \
+gcloud compute scp --recurse ~/wearable-simulator motionlens-vm:~/ --zone us-central1-a && \
+gcloud compute ssh motionlens-vm --zone us-central1-a --command '
+set -euo pipefail
+cd "$HOME/wearable-simulator"
+ML_HOST=motionlens.duckdns.org DUCKDNS_DOMAIN=motionlens DUCKDNS_TOKEN=<duckdns-token> bash deployment_artifacts/scripts/deploy_vm.sh
+sudo docker compose -f deployment_artifacts/compose.yaml ps
+'
+```
+
+The clean redeploy removes the previous MotionLens compose stack, its volumes, and the old VM checkout before copying a fresh repo snapshot. It does not remove unrelated host services that may also be bound to ports `80` or `443`.
+
 ## Testing
 
 Run the full test suite:
