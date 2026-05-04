@@ -1,0 +1,14 @@
+$ML_HOST {
+    encode gzip zstd
+
+    @backend path /v1/* /mobile-capture /health
+    handle @backend {
+        reverse_proxy backend:8000 {
+            header_up X-Forwarded-Proto https
+        }
+    }
+
+    handle {
+        reverse_proxy streamlit:8501
+    }
+}

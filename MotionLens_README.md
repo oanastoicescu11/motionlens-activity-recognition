@@ -490,6 +490,34 @@ $env:MLIVE_PUBLIC_BACKEND_URL="http://<LAN-IP>:8000"
 
 If using Redis, make sure a Redis server is running and the Python `redis` package is installed.
 
+## Ubuntu VM deployment
+
+The repository now includes committed deployment artifacts for a single-host stack:
+
+- `.dockerignore`
+- `deployment_artifacts/Dockerfile`
+- `deployment_artifacts/compose.yaml`
+- `deployment_artifacts/caddy/Caddyfile`
+- `deployment_artifacts/.env.production.example`
+- `deployment_artifacts/scripts/install_docker_ubuntu.sh`
+- `deployment_artifacts/scripts/deploy_vm.sh`
+
+On an Ubuntu VM, clone the repository and run one command from the repo root:
+
+```bash
+ML_HOST=motionlens.duckdns.org DUCKDNS_DOMAIN=motionlens DUCKDNS_TOKEN=<duckdns-token> bash deployment_artifacts/scripts/deploy_vm.sh
+```
+
+The deploy script will:
+
+- install Docker and the Compose plugin if they are missing
+- write `deployment_artifacts/.env.production`
+- optionally configure a DuckDNS updater cron job
+- build the backend, worker, and Streamlit images
+- start Caddy, Redis, the backend, the worker, and the Streamlit UI
+
+If you already manage DNS yourself, omit the DuckDNS variables and only set `ML_HOST`.
+
 ## Phone setup notes
 
 - Phone and computer must be on the same local network.
