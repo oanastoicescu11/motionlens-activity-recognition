@@ -152,6 +152,8 @@ celerybeat.pid
 
 # Environments
 .env
+.env.production
+deployment_artifacts/.env.production
 .envrc
 .venv
 env/
