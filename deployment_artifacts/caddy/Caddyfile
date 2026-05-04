@@ -1,4 +1,4 @@
-$ML_HOST {
+{$ML_HOST} {
     encode gzip zstd
 
     @backend path /v1/* /mobile-capture /health
