@@ -444,6 +444,18 @@ If you force-pushed rewritten history, replace `git pull --ff-only` with:
 git fetch origin && git reset --hard origin/main && git clean -fd
 ```
 
+If you only want deployment files on the VM, stage a minimal bundle first. The bundle includes only `pyproject.toml`, `run_worker.py`, `.dockerignore`, `src/`, and `deployment_artifacts/`.
+
+```bash
+cd ~/wearable-simulator
+bash deployment_artifacts/scripts/create_vm_bundle.sh
+gcloud compute ssh motionlens-vm --zone us-central1-a --command 'rm -rf "$HOME/wearable-simulator"'
+gcloud compute scp --recurse .vm-deploy-bundle motionlens-vm:~/wearable-simulator --zone us-central1-a
+gcloud compute ssh motionlens-vm --zone us-central1-a --command 'cd "$HOME/wearable-simulator" && ML_HOST=motionlens.duckdns.org DUCKDNS_DOMAIN=motionlens DUCKDNS_TOKEN=<duckdns-token> bash deployment_artifacts/scripts/deploy_vm.sh'
+```
+
+This avoids copying `tests/`, `processing/`, `data/`, `output/`, `plans/`, and repo docs to the VM while still preserving the Docker build context the deployment stack expects.
+
 ### Clean redeploy
 
 Use this only when the VM is in a bad state, old containers are hanging around, or ports `80` and `443` may still be occupied by an older MotionLens stack.
