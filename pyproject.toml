@@ -26,4 +26,7 @@ package-dir = {"" = "src"}
 
 [tool.setuptools.packages.find]
 where = ["src"]
-include = ["app*", "core*"]
+include = ["app*", "core*", "artifacts*"]
+
+[tool.setuptools.package-data]
+"artifacts.model" = ["inference_bundle.joblib"]
