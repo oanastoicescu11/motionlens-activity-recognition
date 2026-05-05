@@ -1,6 +1,6 @@
 # MotionLens
 
-MotionLens is a pocket-phone accelerometer activity-analysis app. It accepts uploaded 3-axis CSV files or live browser `DeviceMotion` streams, normalizes them to a shared 50 Hz contract, separates gravity from body motion, extracts engineered window features, runs XGBoost with guard logic and causal HMM decoding, and serves the results through a FastAPI backend and Streamlit dashboard.
+MotionLens is a pocket-phone accelerometer activity-analysis app. It accepts live browser `DeviceMotion` streams, normalizes them to a shared 50 Hz contract, separates gravity from body motion, extracts engineered window features, runs XGBoost with guard logic and causal HMM decoding, and serves the results through a FastAPI backend and Streamlit dashboard.
 
 MotionLens is ACC-first: timestamp plus `acc_x`, `acc_y`, and `acc_z` are enough to run the pipeline. The current training and interpretation scope is smartphone pocket carry.
 
@@ -14,8 +14,7 @@ Core outputs:
 - Cadence and periodicity estimates for rhythmic locomotion
 - Impact/motion intensity timeline
 - Rhythm consistency
-- Low-confidence breathing proxy for quiet/static windows only
-- Red/yellow/green signal or placement-quality guidance
+- Signal-quality scoring and phone-orientation context
 - Interpretable DSP and feature-based reporting rather than black-box-only labels
 
 Current activity labels:
@@ -32,22 +31,22 @@ Runtime predictions are emitted over the seven labels above.
 
 ## Data scope
 
-MotionLens is trained and evaluated on pocket-phone recordings from these sources:
+MotionLens is trained on pocket-phone recordings from these sources. The current checked-in evaluation run reports held-out metrics only for datasets with test subjects.
 
-| Dataset | Carry position | Hz | Role | Citation |
-|---|---:|---:|---|---|
-| WISDM | front pants-leg pocket | 20 → 50 | Controlled pocket HAR baseline | [D1] |
-| MotionSense | trousers front pocket | 50 | Closest public iPhone/Core Motion proxy | [D2] |
-| WISDM v2 | front pants-leg pocket | 20 → 50 | Larger Android pocket dataset | [D3] |
-| RealWorld2016 | thigh stream only | ~50 | Front-pocket proxy from multi-phone study | [D4] |
-| UniMiB-SHAR | front pants pocket | 50 | ADL and transition examples | [D5] |
-| UMA Fall | right pants pocket only | 200 → 50 | Pocket locomotion and transitions | [D6] |
-| Shoaib 2013 | right jeans pocket | 50 | Small controlled pocket set | [D7] |
-| Shoaib Sensors | left + right jeans pockets | 50 | Bilateral pocket data | [D8] |
-| UT Complex | smartphone at pocket | 50 | Complex activity subset | [D8], [D9] |
-| iPhone Placement Sweep | lateral left/right lower only | ~100 → 50 | Local lateral side-hip calibration | repo-local capture |
+| Dataset | Carry position | Hz | Split in current run | Role | Citation |
+|---|---:|---:|---|---|---|
+| WISDM | front pants-leg pocket | 20 → 50 | held-out eval | Controlled pocket HAR baseline | [D1] |
+| MotionSense | trousers front pocket | 50 | held-out eval | Closest public iPhone/Core Motion proxy | [D2] |
+| WISDM v2 | front pants-leg pocket | 20 → 50 | held-out eval | Larger Android pocket dataset | [D3] |
+| RealWorld2016 | thigh stream only | ~50 | held-out eval | Front-pocket proxy from multi-phone study | [D4] |
+| UniMiB-SHAR | front pants pocket | 50 | held-out eval | ADL and transition examples | [D5] |
+| UMA Fall | right pants pocket only | 200 → 50 | held-out eval | Pocket locomotion and transitions | [D6] |
+| Shoaib 2013 | right jeans pocket | 50 | train_only | Small controlled pocket set | [D7] |
+| Shoaib Sensors | left + right jeans pockets | 50 | held-out eval | Bilateral pocket data | [D8] |
+| UT Complex | smartphone at pocket | 50 | train_only | Complex activity subset | [D8], [D9] |
+| iPhone Placement Sweep | lateral left/right lower only | ~100 → 50 | train_only | Local lateral side-hip calibration | repo-local capture |
 
-Each source is normalized into the same accelerometer contract before feature extraction, training, and live inference.
+All sources are normalized into the same accelerometer contract before feature extraction, training, and live inference. The published per-dataset metrics in the current pocket-only run cover WISDM, MotionSense, WISDM v2, RealWorld2016, UniMiB-SHAR, UMA Fall, and Shoaib Sensors.
 
 ## Signal-processing contract
 
@@ -95,7 +94,6 @@ Important signal facts:
 - Per-axis structure matters; activity evidence is not just magnitude.
 - Walking/running cadence is usually in the low-Hz locomotion band.
 - Cadence is suppressed when motion is too weak or no clear periodic peak exists.
-- Quiet/static windows are required before attempting any breathing proxy.
 
 ## Feature extraction
 
@@ -205,7 +203,7 @@ Main components:
 
 - FastAPI backend: session lifecycle, auth, ingest, mobile capture page, signal/inference endpoints
 - Streamlit UI: desktop dashboard and QR-code mobile join flow
-- Mobile capture page: browser DeviceMotion capture and upload
+- Mobile capture page: browser DeviceMotion capture and streaming
 - Worker pipeline: resampling, feature extraction, XGBoost inference, guards, artifact scoring, cadence extraction, HMM decoding, and inference snapshot serialization
 - Store abstraction: in-memory store for local development, Redis implementation for multi-process/runtime use
 
@@ -345,7 +343,7 @@ $env:MLIVE_PUBLIC_BACKEND_URL="http://<LAN-IP>:8000"
 
 ### 4. Phone and browser notes
 
-- Live phone capture in this repo has been tested with Chrome on the phone.
+- For the simplest local setup, use Chrome on Android with a LAN URL.
 - Keep the phone and computer on the same network when you use a LAN URL.
 - Set `MLIVE_PUBLIC_BACKEND_URL` to the backend address the phone can actually open.
 - Android/Chrome can use `http://<LAN-IP>:8000`.
@@ -404,6 +402,35 @@ docker compose -f deployment_artifacts/compose.yaml ps
 
 4. Open `https://<ML_HOST>` after DNS and certificates are ready.
 
+### Local Docker Compose stack
+
+If you want the same containerized app shape locally as on the VM, run the backend, worker, Streamlit, and Redis containers locally without Caddy.
+
+1. Copy the local environment template:
+
+```powershell
+Copy-Item deployment_artifacts/.env.local.example deployment_artifacts/.env.local
+```
+
+2. If you want phone access from another device on your LAN, edit `deployment_artifacts/.env.local` and set `MLIVE_PUBLIC_BACKEND_URL` to `http://<LAN-IP>:8000`. For desktop-only local use, leave it as `http://localhost:8000`.
+
+3. Build and start the local stack:
+
+```powershell
+docker compose -f deployment_artifacts/compose.local.yaml up -d --build
+docker compose -f deployment_artifacts/compose.local.yaml ps
+```
+
+4. Open `http://localhost:8501` for the dashboard.
+
+5. Stop it with:
+
+```powershell
+docker compose -f deployment_artifacts/compose.local.yaml down
+```
+
+This is production-like in service layout, but it is intentionally not the public-HTTPS VM setup. It binds backend `8000` and Streamlit `8501` directly on your machine and skips Caddy.
+
 ### Ubuntu VM helper script
 
 For a single Ubuntu VM, the repo includes `deployment_artifacts/scripts/deploy_vm.sh`.
@@ -411,7 +438,7 @@ For a single Ubuntu VM, the repo includes `deployment_artifacts/scripts/deploy_v
 With DuckDNS:
 
 ```bash
-ML_HOST=motionlens.duckdns.org DUCKDNS_DOMAIN=motionlens DUCKDNS_TOKEN=<duckdns-token> bash deployment_artifacts/scripts/deploy_vm.sh
+ML_HOST=<duckdns-domain>.duckdns.org DUCKDNS_DOMAIN=<duckdns-domain> DUCKDNS_TOKEN=<duckdns-token> bash deployment_artifacts/scripts/deploy_vm.sh
 ```
 
 With your own DNS:
@@ -561,7 +588,7 @@ bundle from `src/artifacts/model/inference_bundle.joblib`.
 - Keep the app ACC-first.
 - Do not require optional sensors.
 - Do not add medical claims.
-- Do not report fake precision for breathing or placement quality.
+- Do not overclaim signal quality or phone orientation as precise placement classification.
 - Do not revive older waist/abdomen or dense placement-classification framing without a new approved design reset.
 - Do not train on non-pocket streams in the current pocket-only model.
 - Keep public functions typed and documented.

@@ -1,0 +1,70 @@
+services:
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: ["redis-server", "--save", "", "--appendonly", "no"]
+    volumes:
+      - redis-data:/data
+    networks:
+      - internal
+
+  backend:
+    build:
+      context: ..
+      dockerfile: deployment_artifacts/Dockerfile
+    restart: unless-stopped
+    env_file:
+      - ./.env.local
+    environment:
+      MLIVE_ALLOW_INSECURE_LOCAL: "1"
+    command: >
+      python -m uvicorn app.backend.main:app
+      --host 0.0.0.0
+      --port 8000
+    depends_on:
+      - redis
+    ports:
+      - "8000:8000"
+    networks:
+      - internal
+
+  worker:
+    build:
+      context: ..
+      dockerfile: deployment_artifacts/Dockerfile
+    restart: unless-stopped
+    env_file:
+      - ./.env.local
+    command: >
+      python run_worker.py
+      --workers 1
+      --store-backend redis
+    depends_on:
+      - redis
+      - backend
+    networks:
+      - internal
+
+  streamlit:
+    build:
+      context: ..
+      dockerfile: deployment_artifacts/Dockerfile
+    restart: unless-stopped
+    env_file:
+      - ./.env.local
+    command: >
+      python -m streamlit run src/app/ui/streamlit_app.py
+      --server.address 0.0.0.0
+      --server.port 8501
+    depends_on:
+      - backend
+    ports:
+      - "8501:8501"
+    networks:
+      - internal
+
+networks:
+  internal:
+
+volumes:
+  redis-data:
