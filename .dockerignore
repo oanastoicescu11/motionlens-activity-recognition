@@ -11,7 +11,7 @@ __pycache__/
 data/
 output/
 plans/
-processing/
+offline/
 tests/
 
 .vscode/

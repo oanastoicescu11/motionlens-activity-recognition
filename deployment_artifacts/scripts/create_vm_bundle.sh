@@ -49,4 +49,4 @@ copy_path "$ROOT_DIR/deployment_artifacts/scripts" "$OUTPUT_DIR/deployment_artif
 
 echo "Created minimal VM deployment bundle at: $OUTPUT_DIR"
 echo "Included: pyproject.toml, run_worker.py, .dockerignore, src/, deployment_artifacts/"
-echo "Excluded by design: tests/, processing/, data/, output/, plans/, README files, and other repo-only content"
+echo "Excluded by design: tests/, offline/, data/, output/, plans/, README files, and other repo-only content"

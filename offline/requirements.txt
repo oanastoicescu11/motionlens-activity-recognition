@@ -1,5 +1,4 @@
-# Direct dependencies for offline data preparation and model training under processing/.
-
+# Direct dependencies for offline data preparation and model training under offline/.
 joblib==1.5.3
 numpy==2.4.4
 optuna==4.8.0

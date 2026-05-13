@@ -1,6 +1,6 @@
-"""Backward-compatible preprocessing exports for training code."""
+"""Offline preprocessing exports for contract-building code."""
 
-from processing.preprocessing.accelerometer import (
+from offline.processing.preprocessing.accelerometer import (
     AccelerometerSegment,
     GravitySplit,
     PreprocessedAccelerometerSegment,

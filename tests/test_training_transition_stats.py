@@ -2,7 +2,7 @@ import unittest
 
 import numpy as np
 
-from processing.training_transition_stats import estimate_transition_stats
+from offline.training.training_transition_stats import estimate_transition_stats
 
 
 class TrainingTransitionStatsTests(unittest.TestCase):

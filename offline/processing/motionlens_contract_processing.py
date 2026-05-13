@@ -26,7 +26,7 @@ from pathlib import Path
 from typing import Iterable, Iterator, Sequence
 
 if __package__ in {None, ""}:
-    repo_root = Path(__file__).resolve().parents[1]
+    repo_root = Path(__file__).resolve().parents[2]
     if str(repo_root) not in sys.path:
         sys.path.insert(0, str(repo_root))
 
@@ -36,7 +36,7 @@ import pyarrow as pa
 import pyarrow.csv as pa_csv
 import pyarrow.parquet as pq
 
-from processing.preprocessing import (
+from offline.processing.preprocessing import (
     AccelerometerSegment,
     preprocess_numeric_timeseries as preprocess_numeric_segments,
     preprocess_timestamp_timeseries as preprocess_timestamp_segments,

@@ -1,7 +1,5 @@
-"""Train pocket-only XGBoost model -- identical logic to motionlens_xgboost_baseline.py
-but with two differences:
-  1. Data is filtered to smartphone pocket / lateral-waist placements only.
-  2. Placement one-hot features are NOT included (placement_labels=[]).
+"""Train pocket-only XGBoost model.
+Data is filtered to smartphone pocket / lateral-waist placements only.
 """
 
 from __future__ import annotations
@@ -17,7 +15,7 @@ import sys
 from pathlib import Path
 
 if __package__ in {None, ""}:
-    repo_root = Path(__file__).resolve().parents[1]
+    repo_root = Path(__file__).resolve().parents[2]
     if str(repo_root) not in sys.path:
         sys.path.insert(0, str(repo_root))
 
@@ -36,10 +34,10 @@ from core.inference import (
     causal_hmm_decode as core_causal_hmm_decode,
     predict_hierarchical_proba as core_predict_hierarchical_proba,
 )
-from processing.inference import (
+from offline.training.inference import (
     decode_predictions as core_decode_predictions,
 )
-from processing.training_transition_stats import (
+from offline.training.training_transition_stats import (
     estimate_transition_stats as training_estimate_transition_stats,
 )
 

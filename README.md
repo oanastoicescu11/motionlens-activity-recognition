@@ -110,7 +110,7 @@ Feature families include:
 - Jerk and impact features
 - Cadence and periodicity features
 
-The latest evaluated pocket-only run in the repo uses **151 features**.
+The latest evaluated pocket-only run in the repo uses **153 features**.
 
 Key shared modules:
 
@@ -118,7 +118,7 @@ Key shared modules:
 src/core/features/window_features.py
 src/core/inference/model.py
 src/app/worker/_steps.py
-processing/train_pocket_only_v1.py
+offline/training/train_pocket_only_v1.py
 ```
 
 ## Model
@@ -126,14 +126,14 @@ processing/train_pocket_only_v1.py
 The current training pipeline is implemented in:
 
 ```text
-processing/train_pocket_only_v1.py
+offline/training/train_pocket_only_v1.py
 ```
 
 Model design:
 
 - XGBoost multiclass classifier
 - 128-sample windows at 50 Hz
-- 151 engineered features per window
+- 153 engineered features per window
 - Subject-level holdout per dataset where possible
 - Causal HMM temporal decoding
 - Static specialist/refinement for difficult static posture cases
@@ -149,27 +149,27 @@ Training runs write metrics, feature schemas, confusion matrices, and transition
 
 ## Current model metrics
 
-Latest evaluated pocket-only run metrics (`output/model_pocket_ultra_tuned/metrics.json`):
+Latest evaluated pocket-only run metrics (`output/final_model/metrics.json`):
 
 | Metric | Value |
 |---|---:|
-| Decoded accuracy | 0.904712 |
-| Raw accuracy | 0.848810 |
+| Decoded accuracy | 0.899903 |
+| Raw accuracy | 0.845438 |
 | Train windows | 153,870 |
 | Test windows | 38,263 |
-| Feature count | 151 |
+| Feature count | 153 |
 
-Per-dataset decoded accuracy (`output/model_pocket_ultra_tuned/per_dataset_metrics.csv`):
+Per-dataset decoded accuracy (`output/final_model/per_dataset_metrics.csv`):
 
 | Dataset | Accuracy |
 |---|---:|
-| MotionSense | 0.8960 |
-| RealWorld2016 | 0.8838 |
-| Shoaib Sensors | 0.9980 |
-| UMA Fall | 0.6622 |
-| UniMiB-SHAR | 0.9360 |
-| WISDM | 0.9240 |
-| WISDM v2 | 0.8591 |
+| MotionSense | 0.905465 |
+| RealWorld2016 | 0.870196 |
+| Shoaib Sensors | 0.998022 |
+| UMA Fall | 0.667568 |
+| UniMiB-SHAR | 0.944269 |
+| WISDM | 0.927208 |
+| WISDM v2 | 0.844542 |
 
 ## Repository structure
 
@@ -179,7 +179,7 @@ High-level structure:
 .
 ├── src/app/                     # Live backend, worker, and UI
 ├── src/core/                    # Shared preprocessing, features, inference, guards
-├── processing/                  # Offline dataset contract + model training
+├── offline/                     # Offline dataset contract + model training
 ├── src/artifacts/model/         # Current trained runtime model bundle
 ├── output/motionlens_contract/  # Canonical training contract outputs
 ├── tests/                       # Unit and integration tests
@@ -481,7 +481,7 @@ gcloud compute scp --recurse .vm-deploy-bundle motionlens-vm:~/wearable-simulato
 gcloud compute ssh motionlens-vm --zone us-central1-a --command 'cd "$HOME/wearable-simulator" && ML_HOST=motionlens.duckdns.org DUCKDNS_DOMAIN=motionlens DUCKDNS_TOKEN=<duckdns-token> bash deployment_artifacts/scripts/deploy_vm.sh'
 ```
 
-This avoids copying `tests/`, `processing/`, `data/`, `output/`, `plans/`, and repo docs to the VM while still preserving the Docker build context the deployment stack expects.
+This avoids copying `tests/`, `offline/`, `data/`, `output/`, `plans/`, and repo docs to the VM while still preserving the Docker build context the deployment stack expects.
 
 ### Clean redeploy
 
@@ -546,15 +546,15 @@ Tests cover:
 
 ## Offline processing pipeline
 
-The `processing/` folder builds the canonical dataset contract and trains the model.
+The `offline/` folder holds the offline dataset contract and model-training code. Inside it, `offline/processing/` contains data-processing code and `offline/training/` contains training code.
 
 Important files:
 
 ```text
-processing/motionlens_contract_processing.py
-processing/prepare_pocket_only_training_data.py
-processing/training_transition_stats.py
-processing/train_pocket_only_v1.py
+offline/processing/motionlens_contract_processing.py
+offline/processing/prepare_pocket_only_training_data.py
+offline/training/training_transition_stats.py
+offline/training/train_pocket_only_v1.py
 ```
 
 Canonical dataset outputs:
@@ -570,7 +570,7 @@ output/motionlens_contract/
 Training output:
 
 ```text
-output/model_pocket_ultra_tuned/
+output/final_model/
 ```
 
 Current runtime artifact path:
