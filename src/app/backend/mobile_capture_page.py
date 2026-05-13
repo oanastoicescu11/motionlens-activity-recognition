@@ -186,6 +186,9 @@ _MOBILE_PAGE_HTML = """<!doctype html>
       Stream accelerometer data from this phone for live activity recognition. When you stop streaming,
       a short summary of your activity appears here. For the clearest result, keep the phone in a trouser pocket while moving.
     </div>
+    <div style="margin-top:10px; padding:10px 12px; border-radius:12px; background:#fff1d6; color:#7a4b00; font-weight:700;">
+      (!) Supported browser: Chrome mobile
+    </div>
   </div>
 
   <div class="card">

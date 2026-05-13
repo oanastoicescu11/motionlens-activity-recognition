@@ -314,6 +314,7 @@ def _render_home_intro(*, show_phone_setup: bool, summary_available: bool) -> No
     st.caption(
         "MotionLens uses your phone's accelerometer for live activity recognition and a short session recap when you stop."
     )
+    st.warning("(!) Supported browser: Chrome")
     if show_phone_setup:
         st.info(
             "Scan the QR code on your computer to start streaming motion data from your phone, then watch the live prediction update here. "
