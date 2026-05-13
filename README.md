@@ -4,6 +4,8 @@ MotionLens is a pocket-phone accelerometer activity-analysis app. It accepts liv
 
 MotionLens is ACC-first: timestamp plus `acc_x`, `acc_y`, and `acc_z` are enough to run the pipeline. The current training and interpretation scope is smartphone pocket carry.
 
+Live deployment: [motionlens.duckdns.org](https://motionlens.duckdns.org)
+
 ## What MotionLens does
 
 Core outputs:
@@ -145,11 +147,11 @@ Live runtime bundle:
 src/artifacts/model/inference_bundle.joblib
 ```
 
-Training runs write metrics, feature schemas, confusion matrices, and transition statistics under `output/...`. The worker loads the committed runtime bundle in `src/app/worker/_steps.py` and runs the live inference flow in `src/app/worker/pipeline.py`.
+Training runs write local metrics, feature schemas, confusion matrices, and transition statistics during offline evaluation. The worker loads the committed runtime bundle in `src/app/worker/_steps.py` and runs the live inference flow in `src/app/worker/pipeline.py`.
 
 ## Current model metrics
 
-Latest evaluated pocket-only run metrics (`output/final_model/metrics.json`):
+Latest evaluated pocket-only run metrics (from the local final-model evaluation artifacts):
 
 | Metric | Value |
 |---|---:|
@@ -159,7 +161,7 @@ Latest evaluated pocket-only run metrics (`output/final_model/metrics.json`):
 | Test windows | 38,263 |
 | Feature count | 153 |
 
-Per-dataset decoded accuracy (`output/final_model/per_dataset_metrics.csv`):
+Per-dataset decoded accuracy (from the same local evaluation run):
 
 | Dataset | Accuracy |
 |---|---:|
@@ -181,7 +183,6 @@ High-level structure:
 ├── src/core/                    # Shared preprocessing, features, inference, guards
 ├── offline/                     # Offline dataset contract + model training
 ├── src/artifacts/model/         # Current trained runtime model bundle
-├── output/motionlens_contract/  # Canonical training contract outputs
 ├── tests/                       # Unit and integration tests
 └── run_worker.py                # Worker entrypoint
 ```
@@ -481,7 +482,7 @@ gcloud compute scp --recurse .vm-deploy-bundle motionlens-vm:~/wearable-simulato
 gcloud compute ssh motionlens-vm --zone us-central1-a --command 'cd "$HOME/wearable-simulator" && ML_HOST=motionlens.duckdns.org DUCKDNS_DOMAIN=motionlens DUCKDNS_TOKEN=<duckdns-token> bash deployment_artifacts/scripts/deploy_vm.sh'
 ```
 
-This avoids copying `tests/`, `offline/`, `data/`, `output/`, `plans/`, and repo docs to the VM while still preserving the Docker build context the deployment stack expects.
+This avoids copying `tests/`, `offline/`, `data/`, local generated artifacts, `plans/`, and repo docs to the VM while still preserving the Docker build context the deployment stack expects.
 
 ### Clean redeploy
 
@@ -557,22 +558,6 @@ offline/training/training_transition_stats.py
 offline/training/train_pocket_only_v1.py
 ```
 
-Canonical dataset outputs:
-
-```text
-output/motionlens_contract/
-├── session_manifest.parquet
-├── window_manifest.parquet
-├── dataset_summary.csv
-└── parquet partitions
-```
-
-Training output:
-
-```text
-output/final_model/
-```
-
 Current runtime artifact path:
 
 ```text
@@ -580,7 +565,7 @@ src/artifacts/model/inference_bundle.joblib
 ```
 
 Promoting a model to live inference is a separate deployment step. Training runs write
-their evaluation artifacts under `output/...`; the app only loads the committed runtime
+their evaluation artifacts locally; the app only loads the committed runtime
 bundle from `src/artifacts/model/inference_bundle.joblib`.
 
 ## Development rules
