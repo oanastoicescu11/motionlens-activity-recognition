@@ -77,8 +77,8 @@ class LiveInsightsTests(unittest.TestCase):
             gravity_tilt_abs_z_std=0.05,
             body_mag_coeff_var=0.3,
             gravity_x_mean=0.5,
-            gravity_y_mean=0.3,
-            gravity_z_mean=-9.5,
+            gravity_y_mean=-9.5,
+            gravity_z_mean=0.3,
             gravity_angle_stability_std=0.02,
             body_mag_std=1.2,
         )
@@ -339,13 +339,16 @@ class InsightHelperTests(unittest.TestCase):
         self.assertAlmostEqual(deg, 5.73, places=1)
 
     def test_phone_orientation_upright(self) -> None:
-        self.assertEqual(_phone_orientation(0.0, 0.0, -9.8), "upright")
+        self.assertEqual(_phone_orientation(0.0, -9.8, 0.0), "upright")
 
     def test_phone_orientation_flat(self) -> None:
-        self.assertEqual(_phone_orientation(0.0, 0.0, 0.0), "flat")
+        self.assertEqual(_phone_orientation(0.0, 0.0, -9.8), "flat")
+
+    def test_phone_orientation_flat_face_down(self) -> None:
+        self.assertEqual(_phone_orientation(0.0, 0.0, 9.8), "flat")
 
     def test_phone_orientation_upside_down(self) -> None:
-        self.assertEqual(_phone_orientation(0.0, 0.0, 9.8), "upside-down")
+        self.assertEqual(_phone_orientation(0.0, 9.8, 0.0), "upside-down")
 
     def test_signal_quality_good(self) -> None:
         score = _signal_quality(artifact_score=0.1, dwt_ratio=0.6, coeff_var=0.2)

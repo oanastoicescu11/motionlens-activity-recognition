@@ -277,17 +277,21 @@ def _sway_amplitude(gravity_tilt_std: float) -> float:
 def _phone_orientation(gx: float, gy: float, gz: float) -> str:
     """Human-readable phone orientation from gravity vector mean.
 
-    Thresholds based on typical gravity vector alignments:
-    - upright: z ≈ -9.81 (phone vertical in pocket)
-    - flat: z ≈ 0 (phone horizontal)
-    - upside-down: z ≈ +9.81
-    - tilted: anything in between
+    DeviceMotion portrait frame: gravity aligns with ±Y when the phone is
+    vertical (pocket carry) and with ±Z when the phone is flat (horizontal).
     """
-    gz_abs = abs(gz)
-    if gz_abs >= 8.5:
-        return "upright" if gz < 0 else "upside-down"
-    if gz_abs <= 2.0:
+    abs_x, abs_y, abs_z = abs(gx), abs(gy), abs(gz)
+    dominant = max(abs_x, abs_y, abs_z)
+
+    if dominant < 2.0:
+        return "tilted"
+
+    if abs_z >= 8.5 and abs_z >= abs_y and abs_z >= abs_x:
         return "flat"
+
+    if abs_y >= 8.5 and abs_y >= abs_z and abs_y >= abs_x:
+        return "upright" if gy < 0 else "upside-down"
+
     return "tilted"
 
 
