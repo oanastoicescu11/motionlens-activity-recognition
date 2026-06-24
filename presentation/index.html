@@ -1,0 +1,1064 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>MotionLens — Technical Deep Dive</title>
+
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/reveal.js@5.1.0/dist/reveal.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/reveal.js@5.1.0/plugin/highlight/monokai.css">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+
+<style>
+:root{
+  --bg:#0a1020; --bg2:#0d1730; --panel:#111d39; --panel2:#16244a;
+  --ink:#e8eef8; --muted:#9db0cd; --faint:#6c809f;
+  --accent:#2fe0cf; --accent2:#5b8cff; --amber:#f7b955; --good:#4fd98a; --bad:#ff6b6b; --violet:#b78bff;
+  --border:rgba(255,255,255,.10); --border2:rgba(255,255,255,.16);
+  --mono:'JetBrains Mono',ui-monospace,Menlo,Consolas,monospace;
+}
+html,body{height:100%;}
+.reveal{font-family:'Inter',system-ui,-apple-system,Segoe UI,Roboto,sans-serif;font-size:24px;color:var(--ink);
+  background:
+    radial-gradient(1200px 700px at 12% -8%, #16264d 0%, rgba(22,38,77,0) 55%),
+    radial-gradient(1100px 800px at 110% 10%, #10283f 0%, rgba(16,40,63,0) 50%),
+    linear-gradient(180deg,#0a1020 0%, #0a0f1d 100%);
+}
+.reveal .slides{ text-align:left; }
+.reveal .slides section{ height:100%; top:0!important; }
+.reveal h1,.reveal h2,.reveal h3,.reveal h4{ color:#fff; font-weight:700; letter-spacing:-.01em; text-transform:none; line-height:1.12; margin:0 0 .35em; }
+.reveal h1{ font-size:2.55em; font-weight:800; }
+.reveal h2{ font-size:1.5em; }
+.reveal h3{ font-size:1.05em; }
+.reveal p{ line-height:1.4; margin:.35em 0; }
+.reveal strong{ color:#fff; }
+.reveal em{ color:var(--accent); font-style:normal; }
+.reveal a{ color:var(--accent); text-decoration:none; }
+.reveal ul,.reveal ol{ margin:.2em 0 .2em 1.05em; }
+.reveal li{ margin:.22em 0; line-height:1.32; }
+.reveal li::marker{ color:var(--accent); }
+.reveal small{ color:var(--muted); }
+
+/* kicker / section label */
+.kicker{ display:inline-flex; align-items:center; gap:.55em; font-family:var(--mono); font-size:.6em;
+  letter-spacing:.22em; text-transform:uppercase; color:var(--accent); font-weight:600; margin-bottom:.5em; }
+.kicker::before{ content:""; width:26px; height:2px; background:linear-gradient(90deg,var(--accent),transparent); display:inline-block; }
+h2 .u, .titlebar{ position:relative; }
+.titlebar{ padding-bottom:.26em; border-bottom:1px solid var(--border); margin-bottom:.5em; }
+
+/* layout helpers */
+.grid{ display:grid; gap:18px; }
+.g2{ grid-template-columns:1fr 1fr; } .g3{ grid-template-columns:1fr 1fr 1fr; } .g4{ grid-template-columns:1fr 1fr 1fr 1fr; }
+.g23{ grid-template-columns:1.25fr 1fr; } .g32{ grid-template-columns:1fr 1.3fr; }
+.gdiagram{ grid-template-columns:1.78fr 1fr; align-items:center; }
+.slide-pipeline .titlebar{ margin-bottom:.28em; padding-bottom:.12em; }
+.slide-pipeline .pipeline-body{ display:grid; grid-template-columns:1.08fr 1fr; gap:16px; align-items:start; }
+.slide-pipeline .diagram-wrap{ padding:8px 10px; margin:0; }
+.slide-pipeline .diagram-wrap .mermaid svg{ max-height:470px; }
+.slide-pipeline .pipeline-side{ display:flex; flex-direction:column; gap:10px; }
+.slide-pipeline .pipeline-side table{ margin:0; font-size:.7em; }
+.slide-pipeline .pipeline-side table td{ padding:.34em .5em; line-height:1.28; }
+.slide-pipeline .pipeline-side table td:first-child{ width:34%; color:var(--muted); white-space:nowrap; vertical-align:top; }
+.slide-pipeline .pipeline-side .key{ margin:0; font-size:.7em; line-height:1.3; padding:.45em .65em; }
+.rows{ display:flex; flex-direction:column; gap:12px; }
+.center-v{ display:flex; flex-direction:column; justify-content:center; height:100%; }
+.fill{ height:100%; }
+
+.card{ background:linear-gradient(180deg,rgba(255,255,255,.045),rgba(255,255,255,.015));
+  border:1px solid var(--border); border-radius:14px; padding:14px 16px; }
+.card h3{ margin:0 0 .3em; font-size:.92em; color:#fff; display:flex; align-items:center; gap:.5em; }
+.card.accent{ border-color:rgba(47,224,207,.35); box-shadow:0 0 0 1px rgba(47,224,207,.08) inset; }
+.card .big{ font-size:2.1em; font-weight:800; color:#fff; line-height:1; }
+.card .lbl{ color:var(--muted); font-size:.66em; text-transform:uppercase; letter-spacing:.1em; }
+
+.pill{ display:inline-block; font-family:var(--mono); font-size:.62em; padding:.32em .7em; border-radius:999px;
+  border:1px solid var(--border2); color:var(--muted); background:rgba(255,255,255,.03); margin:.16em .18em 0 0; }
+.pill.a{ color:var(--accent); border-color:rgba(47,224,207,.4); }
+.pill.b{ color:var(--accent2); border-color:rgba(91,140,255,.4); }
+.pill.am{ color:var(--amber); border-color:rgba(247,185,85,.4); }
+
+.tag{ font-family:var(--mono); font-size:.66em; color:var(--accent); }
+.muted{ color:var(--muted); } .faint{ color:var(--faint); }
+.good{ color:var(--good); } .bad{ color:var(--bad); } .amber{ color:var(--amber); }
+.tiny{ font-size:.66em; } .sm{ font-size:.8em; }
+
+/* tables */
+.reveal table{ width:100%; border-collapse:collapse; font-size:.74em; margin:.2em 0; }
+.reveal table th{ text-align:left; color:#cfe; font-weight:600; border-bottom:1px solid var(--border2);
+  padding:.5em .6em; background:rgba(91,140,255,.08); }
+.reveal table td{ padding:.42em .6em; border-bottom:1px solid var(--border); color:var(--ink); vertical-align:top; }
+.reveal table tr:hover td{ background:rgba(255,255,255,.03); }
+.reveal table.kv td:first-child{ color:var(--muted); width:46%; }
+
+/* code */
+.reveal pre{ width:100%; box-shadow:none; margin:.3em 0; font-size:.54em; }
+.reveal pre code{ font-family:var(--mono); border-radius:12px; border:1px solid var(--border2);
+  background:#0a1226; padding:16px 18px; line-height:1.5; max-height:580px; }
+code.inline{ font-family:var(--mono); background:rgba(91,140,255,.12); color:#cfe0ff; padding:.06em .4em; border-radius:6px; font-size:.84em; }
+
+/* mermaid — enlarged */
+.mermaid{ display:flex; justify-content:center; align-items:center; width:100%; }
+.mermaid svg{ max-width:100%; max-height:580px; height:auto; }
+.diagram-wrap{ background:rgba(8,14,30,.5); border:1px solid var(--border); border-radius:14px; padding:10px; display:flex; justify-content:center; }
+.diagram-wrap.tall .mermaid svg{ max-height:625px; }
+.diagram-wrap.mid .mermaid svg{ max-height:400px; }
+.diagram-wrap.compact .mermaid svg{ max-height:520px; }
+.diagram-wrap.xcompact .mermaid svg{ max-height:220px; }
+
+/* slide 6 — hyperparameter tuning */
+.slide-tuning .titlebar{ margin-bottom:.28em; padding-bottom:.12em; }
+.slide-tuning .tuning-body{ display:grid; grid-template-columns:1.08fr 1fr; gap:16px; align-items:start; }
+.slide-tuning .diagram-wrap{ padding:8px 10px; margin:0; }
+.slide-tuning .diagram-wrap .mermaid svg{ max-height:470px; }
+.slide-tuning .tuning-side{ display:flex; flex-direction:column; gap:10px; }
+.slide-tuning table{ font-size:.7em; margin:0; }
+.slide-tuning table th{ padding:.38em .5em; font-size:.92em; }
+.slide-tuning table td{ padding:.34em .5em; line-height:1.28; }
+.slide-tuning table td:first-child{ width:30%; color:var(--muted); white-space:nowrap; vertical-align:top; }
+.slide-tuning .key{ margin:0; font-size:.7em; line-height:1.3; padding:.45em .65em; }
+
+/* slide 11 — worker async sequence (tall diagram + 4 cards) */
+.slide-worker-async .kicker{ margin-bottom:.32em; }
+.slide-worker-async .titlebar{ margin-bottom:.28em; padding-bottom:.14em; font-size:1.32em; }
+.slide-worker-async .diagram-wrap{ padding:5px 8px; }
+.slide-worker-async .diagram-wrap .mermaid svg{ max-height:500px; }
+.slide-worker-async .grid.g4{ gap:9px; margin-top:.32em!important; }
+.slide-worker-async .card{ padding:8px 10px; border-radius:10px; }
+.slide-worker-async .card h3{ font-size:.76em; margin-bottom:.18em; }
+.slide-worker-async .card .tiny{ font-size:.57em; line-height:1.22; display:block; }
+
+/* slide 18 — edge device (diagram + 3 levers) */
+.slide-edge .titlebar{ margin-bottom:.3em; padding-bottom:.14em; font-size:1.32em; }
+.slide-edge .diagram-wrap{ padding:5px 8px; margin-bottom:.45em; }
+.slide-edge .diagram-wrap .mermaid svg{ max-height:175px; }
+.slide-edge .grid.g3{ gap:11px; }
+.slide-edge .card{ padding:10px 12px; }
+.slide-edge .card h3{ font-size:.82em; margin-bottom:.25em; }
+.slide-edge .card ul{ margin:.1em 0 0 1em; font-size:.72em; line-height:1.28; }
+.slide-edge .card li{ margin:.18em 0; }
+.slide-edge .key{ margin-top:.45em; }
+
+/* feature reference slides (153 rows split across 4 slides) */
+.slide-feature-ref .titlebar{ margin-bottom:.15em; padding-bottom:.1em; font-size:.92em; }
+.slide-feature-ref .feat-intro{ margin:-.15em 0 .28em; font-size:.62em; line-height:1.28; }
+.slide-feature-ref table{ font-size:.42em; margin:.08em 0 0; line-height:1.18; }
+.slide-feature-ref table th{ padding:.22em .32em; }
+.slide-feature-ref table td{ padding:.18em .32em; }
+.slide-feature-ref tr.guard-feature td{ background:rgba(91,140,255,.10); }
+.slide-feature-ref table td:first-child{ white-space:nowrap; width:22%; }
+.slide-feature-ref table td:nth-child(2){ width:38%; font-family:var(--mono); font-size:.95em; color:#b8cce8; }
+.slide-feature-ref table td.formula{ font-family:var(--mono); color:#cfe0ff; white-space:nowrap; }
+.slide-feature-ref table td:nth-child(3){ width:40%; color:var(--muted); }
+
+/* callouts */
+.note{ border-left:3px solid var(--accent); background:rgba(47,224,207,.07); padding:.5em .8em; border-radius:0 10px 10px 0; }
+.warn{ border-left:3px solid var(--amber); background:rgba(247,185,85,.08); padding:.5em .8em; border-radius:0 10px 10px 0; }
+.key{ border-left:3px solid var(--accent2); background:rgba(91,140,255,.08); padding:.5em .8em; border-radius:0 10px 10px 0; }
+
+/* title slide */
+.title-slide{ display:flex; flex-direction:column; justify-content:center; height:100%; }
+.title-slide h1{ background:linear-gradient(120deg,#fff 10%, #9ff0e6 50%, #8fb6ff 90%);
+  -webkit-background-clip:text; background-clip:text; -webkit-text-fill-color:transparent; }
+.title-slide .lead{ font-size:1.0em; color:var(--muted); max-width:30ch; margin:.2em 0 .45em; line-height:1.3; }
+.title-slide .title-classes{ margin:.1em 0 .65em; line-height:1.85; }
+.meta-row{ display:flex; gap:26px; flex-wrap:wrap; margin-top:.6em; color:var(--muted); font-size:.72em; }
+.meta-row b{ color:#fff; }
+.brandmark{ font-family:var(--mono); letter-spacing:.2em; color:var(--faint); font-size:.6em; text-transform:uppercase; }
+
+/* dividers */
+.divider{ display:flex; flex-direction:column; justify-content:center; height:100%; }
+.divider .num{ font-family:var(--mono); font-size:1.1em; color:var(--accent); letter-spacing:.3em; }
+.divider h2{ font-size:2.4em; margin:.1em 0 0; }
+.divider .sub{ color:var(--muted); font-size:.95em; margin-top:.4em; max-width:40ch; }
+
+/* footer + chrome */
+.deck-footer{ position:fixed; bottom:10px; left:18px; z-index:30; font-family:var(--mono); font-size:11px;
+  letter-spacing:.06em; color:var(--faint); pointer-events:none; }
+.reveal .slide-number{ font-family:var(--mono); background:transparent; color:var(--faint); right:16px; bottom:8px; font-size:12px; }
+.reveal .progress{ color:var(--accent); height:3px; }
+
+/* scrollbar */
+::-webkit-scrollbar{ width:10px; height:10px; } ::-webkit-scrollbar-thumb{ background:#22325a; border-radius:8px; }
+</style>
+</head>
+<body>
+
+<div class="reveal">
+<div class="slides">
+
+<!-- ============================ TITLE ============================ -->
+<section data-auto-animate>
+  <div class="title-slide">
+    <div class="kicker">Technical Deep Dive · Real-time HAR</div>
+    <h1 data-id="t">MotionLens</h1>
+    <p class="lead">Real-time human-activity recognition from accelerometer streams — built, deployed, and running.</p>
+    <div class="title-classes">
+      <span class="pill a">walk</span><span class="pill a">run</span><span class="pill a">stairs</span>
+      <span class="pill b">sit/lay</span><span class="pill b">stand</span><span class="pill am">transitions</span><span class="pill">locomotion-other</span>
+    </div>
+    <div>
+      <span class="pill a">Python 3.13</span><span class="pill">FastAPI</span><span class="pill am">XGBoost</span>
+      <span class="pill a">Causal HMM</span><span class="pill b">Redis</span><span class="pill">Docker Compose</span>
+      <span class="pill">Caddy / HTTPS</span><span class="pill b">GCP VM</span><span class="pill">SciPy · PyWavelets</span>
+    </div>
+    <div class="meta-row">
+      <span>Live &nbsp;<b><a href="https://motionlens.duckdns.org">motionlens.duckdns.org</a></b></span>
+      <span><b>Oana Laitinen</b></span>
+      <span>Decoded acc &nbsp;<b class="good">90.0%</b> · raw <b>84.5%</b></span>
+    </div>
+    <div style="margin-top:26px" class="brandmark">Current implementation · architecture &amp; design rationale · road to embedded</div>
+  </div>
+</section>
+
+<!-- ============================ ML PIPELINE (offline → live) ============================ -->
+<section class="slide-pipeline">
+  <div class="kicker">From data to live inference</div>
+  <h2 class="titlebar">Offline training, shared features, shipped bundle</h2>
+  <div class="pipeline-body">
+    <div class="diagram-wrap">
+      <pre class="mermaid">
+flowchart TB
+  subgraph OFF["offline/ — not shipped"]
+    O1["10 datasets → contract · 153 features / win"] --> O2["XGB + static specialist · HMM stats"]
+    O2 --> BUN["inference_bundle.joblib"]
+  end
+  BUN ==>|promote| L1
+  subgraph LIVE["live worker"]
+    L1["raw ring · resample @ 50 Hz"] --> L2["same core/ features"]
+    L2 --> L3["bundle · emit · guards · HMM → Redis"]
+  end
+      </pre>
+    </div>
+    <div class="pipeline-side">
+      <table class="kv sm">
+        <tr><td>Training</td><td>~154k windows · subject-level holdout</td></tr>
+        <tr><td>Test</td><td>~38k windows · unseen people only</td></tr>
+        <tr><td>Parity</td><td>same <code class="inline">core/</code> preprocessing + features offline and live</td></tr>
+        <tr><td>Shipped artifact</td><td>one <code class="inline">inference_bundle.joblib</code> per model version</td></tr>
+      </table>
+      <div class="key sm">Feature extraction is not learned — 153 engineered numbers per 2.56 s window feed XGBoost. The live worker recomputes them on every task from the raw ring buffer.</div>
+    </div>
+  </div>
+</section>
+
+<!-- ============================ SIGNAL CONTRACT ============================ -->
+<section>
+  <div class="kicker">Signal contract</div>
+  <h2 class="titlebar">One canonical representation, offline and live</h2>
+  <div class="grid gdiagram">
+    <div class="diagram-wrap">
+      <pre class="mermaid">
+flowchart TB
+  A["raw samples<br/>t, ax, ay, az"] --> B["unit + time norm<br/>sort · dedupe · reject"]
+  B --> D["gap handling<br/>resample 50 Hz"]
+  D --> E["gravity / body split<br/>0.3 Hz Butterworth"]
+  E --> F["128-sample windows<br/>50% overlap"]
+  F --> G["153 features"]
+  G --> H["XGBoost"]
+  H --> I["guards + refinement"]
+  I --> J["causal HMM"]
+  J --> K["activity · cadence<br/>intensity · quality"]
+      </pre>
+    </div>
+    <div class="rows">
+      <table class="kv">
+        <tr><td>Target rate</td><td>50 Hz</td></tr>
+        <tr><td>Window</td><td>128 samples · 2.56 s</td></tr>
+        <tr><td>Step / overlap</td><td>64 samples · 50%</td></tr>
+        <tr><td>Gravity split</td><td>per-axis 0.3 Hz Butterworth LP</td></tr>
+        <tr><td>Body accel</td><td>total − gravity</td></tr>
+        <tr><td>Gap gate</td><td>reject window if span &lt; 0.8×</td></tr>
+        <tr><td>Sources</td><td>10 datasets · 20–200 Hz → 50 Hz</td></tr>
+      </table>
+    </div>
+  </div>
+</section>
+
+<!-- ============================ FEATURES ============================ -->
+<section>
+  <div class="kicker">Feature representation</div>
+  <h2 class="titlebar">153 features across eight families</h2>
+  <div class="grid g4">
+    <div class="card sm"><h3>Time-domain</h3><span class="muted tiny">stats · RMS · energy · percentiles</span></div>
+    <div class="card sm"><h3>Frequency (FFT)</h3><span class="muted tiny">dominant freq · entropy · band ratios</span></div>
+    <div class="card sm"><h3>Time–frequency</h3><span class="muted tiny">wavelet sub-band energy</span></div>
+    <div class="card sm"><h3>Autoregressive</h3><span class="muted tiny">AR coefficients · gait dynamics</span></div>
+    <div class="card sm"><h3>Cross-axis</h3><span class="muted tiny">inter-axis correlation</span></div>
+    <div class="card sm"><h3>Gravity / body</h3><span class="muted tiny">orientation stability · energy share</span></div>
+    <div class="card sm"><h3>Jerk / impact</h3><span class="muted tiny">derivative peaks · sharpness</span></div>
+    <div class="card sm"><h3>Cadence</h3><span class="muted tiny">dominant peak · periodicity strength</span></div>
+  </div>
+  <div class="grid g2" style="margin-top:.5em">
+    <div class="note sm">Engineered, not learned — every input is physically meaningful, so failures are explainable and the representation ports cleanly to constrained hardware.</div>
+  </div>
+</section>
+
+<!-- ============================ MODEL ============================ -->
+<section>
+  <div class="kicker">Classifier stack</div>
+  <h2 class="titlebar">XGBoost emission + targeted refinement</h2>
+  <div class="grid g23">
+    <table>
+      <tr><th>Component</th><th>Role</th></tr>
+      <tr><td>XGBoost multiclass</td><td>Per-window emission over 7 classes</td></tr>
+      <tr><td>Static specialist</td><td>Refines sit/lay vs stand when static mass ≥ gate; conserves static mass</td></tr>
+      <tr><td>Causal HMM</td><td>Temporal decode of the emission stream</td></tr>
+    </table>
+    <div class="rows">
+      <div>
+        <span class="pill a">walk</span><span class="pill a">run</span><span class="pill a">stairs</span>
+        <span class="pill b">sit/lay</span><span class="pill b">stand</span><span class="pill am">transitions</span><span class="pill">locomotion-other</span>
+      </div>
+      <div class="grid g2">
+        <div class="card"><div class="lbl">Raw</div><div class="big">84.5%</div></div>
+        <div class="card accent"><div class="lbl">Decoded</div><div class="big good">90.0%</div></div>
+      </div>
+      <div class="warn tiny">DL evaluated, not adopted: at this data scale, boosted trees are chosen due to smaller computing needs + interpretability.</div>
+    </div>
+  </div>
+</section>
+
+<!-- ============================ MODEL TUNING ============================ -->
+<section class="slide-tuning">
+  <div class="kicker">Training</div>
+  <h2 class="titlebar">Hyperparameter search — tune the full decode path</h2>
+  <div class="tuning-body">
+    <div class="diagram-wrap">
+      <pre class="mermaid">
+flowchart TB
+  TR["train windows"] --> SPL["validation fold<br/>grouped by subject"]
+  SPL --> LOOP["random grid search trials"]
+  LOOP --> CAND["candidate: XGB + decoder + specialist"]
+  CAND --> E2E["fit · specialist blend · causal HMM decode"]
+  E2E --> SC["validation macro-F1"]
+  SC -->|best trial| BUN["inference_bundle.joblib"]
+      </pre>
+    </div>
+    <div class="tuning-side">
+      <table class="kv">
+        <tr><th colspan="2">Tuning process — full live decode path per trial</th></tr>
+        <tr><td>Search target</td><td>XGBoost trees · HMM sticky / cross-coarse · static specialist gate &amp; blend</td></tr>
+        <tr><td>Validation</td><td>Subject-grouped holdout — same anti-leakage discipline as final eval</td></tr>
+        <tr><td>Trial score</td><td>Decoded macro-F1 after specialist + causal HMM — not raw XGBoost accuracy</td></tr>
+        <tr><td>Search</td><td>Random sample over the joint hyperparameter space</td></tr>
+        <tr><td>Final fit</td><td>Best trial refit on full train · class weights</td></tr>
+        <tr><td>Ship</td><td>Winning hyperparams → <code class="inline">inference_bundle.joblib</code></td></tr>
+      </table>
+      <div class="key sm">Guards are hand-coded separately (Slide 8) — not part of this search.</div>
+    </div>
+  </div>
+</section>
+
+<!-- ============================ CAUSAL HMM ============================ -->
+<section>
+  <div class="kicker">Temporal decoding</div>
+  <h2 class="titlebar">Causal HMM — online, stateful, +5.5 pts</h2>
+  <div class="grid gdiagram">
+    <div class="diagram-wrap">
+      <pre class="mermaid">
+flowchart LR
+  E["emission e_t<br/>(XGBoost)"] --> M(("×"))
+  PP["decoder state<br/>(Redis: posterior)"] -->|"@ T"| PR["prior = post · T"]
+  IN["init pi<br/>(new session)"] -.-> PR
+  PR --> M
+  M --> NRM["normalize"] --> PO["posterior t<br/>argmax"]
+  PO -->|"persist"| PP
+      </pre>
+    </div>
+    <div class="rows">
+      <div class="card sm"><code class="inline">prior = post₋₁ @ T</code> · <code class="inline">post = prior × e</code> · normalize · argmax. No lookahead → live-safe.</div>
+      <div class="key sm"><strong>T</strong> learned offline; encodes persistence (walk→walk ≈ 0.9) and kills single-window flicker.</div>
+      <div class="note sm">Decoder state in Redis: posterior + metric_history + window_end_ns → next worker continues the sequence.</div>
+    </div>
+  </div>
+</section>
+
+<!-- ============================ GUARDS ============================ -->
+<section>
+  <div class="kicker">Robustness layer</div>
+  <h2 class="titlebar">Guards — physical priors as hard constraints</h2>
+  <p class="sub" style="margin:-.2em 0 .45em;font-size:.78em;color:var(--muted)">Hand-coded physics rules — reshape emissions before the HMM, sanity-check labels after.</p>
+  <table class="sm" style="margin-bottom:.55em">
+    <tr><th colspan="3">Pre-decode (before HMM)</th></tr>
+    <tr><th>Guard</th><th>When it fires</th><th>What it does</th></tr>
+    <tr><td>Low-motion gate</td><td><code class="inline">body_mag_energy</code> &lt; 0.1</td><td>Removes all locomotion + transitions; only sit/lay &amp; stand left</td></tr>
+    <tr><td>Stairs static</td><td>Low energy, low jerk, low dom freq</td><td>Caps stairs probability</td></tr>
+    <tr><td>Stairs moving</td><td>Moving but wrong rhythm for stairs</td><td>Suppresses stairs using cadence/periodicity</td></tr>
+    <tr><td>Walk guard</td><td>Window looks like smooth walk but model favours run/stairs</td><td>Caps run/stairs, boosts walk</td></tr>
+    <tr><td>Hallucination</td><td>Absurd energy/jerk with stairs prob</td><td>Caps stairs (pocket knock / artifact)</td></tr>
+  </table>
+  <table class="sm">
+    <tr><th colspan="2">Post-decode (after HMM)</th></tr>
+    <tr><th>Guard</th><th>What it does</th></tr>
+    <tr><td>Stairs failsafe</td><td>Decoded stairs too high but raw walk/run support it → demote stairs</td></tr>
+    <tr><td>Locomotion ↔ transitions</td><td>High-energy “transitions” → really walk/run</td></tr>
+    <tr><td>Artifact calibration</td><td>Noisy/artifact window → lower confidence</td></tr>
+    <tr><td>Pocket sanity</td><td>Cadence/periodicity vs label (e.g. run with walk cadence → demote)</td></tr>
+  </table>
+  <div class="key sm" style="margin-top:.5em"><strong>Fail-safe:</strong> physics rules, not learned — better to suppress impossible labels than report them confidently on bad signal.</div>
+  <p class="tiny muted" style="margin-top:.35em"><code class="inline">body_mag_energy</code> = mean(|body|²) · all <strong>11 guard-chain features</strong> highlighted on reference slides <strong>23–25</strong></p>
+</section>
+
+<!-- ============================ RESULTS ============================ -->
+<section>
+  <div class="kicker">Evaluation</div>
+  <h2 class="titlebar">Subject-level holdout</h2>
+  <div class="grid g23">
+    <div class="rows">
+      <div class="grid g3">
+        <div class="card accent"><div class="lbl">Decoded</div><div class="big good">90.0%</div></div>
+        <div class="card"><div class="lbl">Raw</div><div class="big">84.5%</div></div>
+        <div class="card"><div class="lbl">Features</div><div class="big">153</div></div>
+      </div>
+      <div class="key sm">Test subjects never appear in training (~154k train / ~38k test windows). The only honest estimate for unseen people.</div>
+    </div>
+    <table class="sm">
+      <tr><th>Dataset</th><th>Decoded</th></tr>
+      <tr><td>Shoaib Sensors</td><td class="good">0.998</td></tr>
+      <tr><td>UniMiB-SHAR</td><td class="good">0.944</td></tr>
+      <tr><td>WISDM</td><td class="good">0.927</td></tr>
+      <tr><td>MotionSense</td><td class="good">0.905</td></tr>
+      <tr><td>RealWorld2016</td><td>0.870</td></tr>
+      <tr><td>WISDM v2</td><td>0.845</td></tr>
+      <tr><td>UMA Fall</td><td class="amber">0.668</td></tr>
+    </table>
+  </div>
+</section>
+
+<!-- ============================ ARCHITECTURE ============================ -->
+<section>
+  <div class="kicker">Architecture</div>
+  <h2 class="titlebar">Five services, one VM, one internal network</h2>
+  <div class="diagram-wrap tall">
+    <pre class="mermaid">
+flowchart LR
+  subgraph CL["Clients"]
+    P["Phone browser<br/>DeviceMotion ~50 Hz"]
+    D["Desktop browser<br/>dashboard + QR"]
+  end
+  subgraph VM["GCP VM · Docker Compose · internal network"]
+    C["Caddy<br/>HTTPS · ports 80/443 only"]
+    B["FastAPI backend<br/>sessions · auth · ingest"]
+    W["Worker<br/>resample · features<br/>XGB · guards · HMM"]
+    R[("Redis<br/>queue · raw · snapshots")]
+    S["Streamlit :8501"]
+  end
+  P -->|"POST /v1/ingest<br/>GET /inference"| C
+  D -->|"HTTPS"| C
+  C -->|"/v1/* · /health · /mobile-capture"| B
+  C -->|"else → UI"| S
+  S -->|"GET /v1/sessions/*<br/>backend:8000 internal"| B
+  B -->|"append raw + enqueue"| R
+  W -->|"lpop task · read raw"| R
+  W -->|"snapshot + decoder + history"| R
+  B -->|"read on GET"| R
+    </pre>
+  </div>
+</section>
+
+<!-- ============================ WORKER DESIGN ============================ -->
+<section class="slide-worker-async">
+  <div class="kicker">Architecture</div>
+  <h2 class="titlebar">Decoupled async inference</h2>
+  <div class="diagram-wrap compact">
+    <pre class="mermaid">
+sequenceDiagram
+  participant Phone
+  participant Caddy
+  participant Backend
+  participant Redis
+  participant Worker
+  participant Streamlit
+
+  Phone->>Caddy: POST /v1/ingest/{token}
+  Caddy->>Backend: forward
+  Backend->>Backend: token → (session, device) · dedupe message_id
+  Backend->>Redis: append raw points + enqueue task
+  Backend-->>Phone: 200 OK (immediate)
+
+  loop every 50ms
+    Worker->>Redis: lpop inference task
+    Worker->>Redis: read raw points (up to 6000)
+    Note over Worker: resample → features → XGB → guards → HMM → insights
+    Worker->>Redis: write snapshot + decoder state + history
+  end
+
+  loop auto-refresh (~0.35s)
+    Streamlit->>Backend: GET /signal · /inference (backend:8000)
+    Backend->>Redis: read on demand
+    Backend-->>Streamlit: JSON response
+  end
+
+  loop phone inference poll
+    Phone->>Caddy: GET /v1/sessions/{id}/inference
+    Caddy->>Backend: forward
+    Backend->>Redis: get_latest_inference
+    Backend-->>Phone: snapshot
+  end
+    </pre>
+  </div>
+  <div class="grid g4" style="margin-top:.5em">
+    <div class="card sm"><h3>No blocking</h3><span class="muted tiny">ingest returns instantly; ML never stalls the device HTTP call</span></div>
+    <div class="card sm"><h3>Freshness over backlog</h3><span class="muted tiny">queue cap 2000 → drop <em>oldest</em>; always compute newest window</span></div>
+    <div class="card sm"><h3>Stateful streaming</h3><span class="muted tiny">per-session decoder state in Redis → causal continuity across workers</span></div>
+    <div class="card sm"><h3>Separate processes</h3><span class="muted tiny">prod compose runs 1 worker; backend and worker scale independently via Compose</span></div>
+  </div>
+</section>
+
+<!-- ============================ LIVE INSIGHTS ============================ -->
+<section>
+  <div class="kicker">Product output</div>
+  <h2 class="titlebar">Live insights — same feature row, no second model</h2>
+  <p class="sub" style="margin:-.2em 0 .45em;font-size:.78em;color:var(--muted)">Computed after decode from the same feature row · phone capture UI &amp; Streamlit dashboard</p>
+  <div class="grid g2">
+    <table class="sm">
+      <tr><th colspan="2">Per-window · conditional by activity</th></tr>
+      <tr><th>Group</th><th>Metrics</th></tr>
+      <tr><td>All</td><td>Intensity level · burst · phone orientation · posture change · signal quality · confidence tier · activity text</td></tr>
+      <tr><td><span class="pill a" style="font-size:.95em;padding:.2em .45em">walk</span> <span class="pill a" style="font-size:.95em;padding:.2em .45em">run</span> <span class="pill a" style="font-size:.95em;padding:.2em .45em">stairs</span></td><td>Cadence (SPM) · regularity · smoothness · vertical bounce · ground impact</td></tr>
+      <tr><td><span class="pill b" style="font-size:.95em;padding:.2em .45em">sit/lay</span> <span class="pill b" style="font-size:.95em;padding:.2em .45em">stand</span></td><td>Posture stability · sway amplitude</td></tr>
+      <tr><td><span class="pill am" style="font-size:.95em;padding:.2em .45em">transitions</span></td><td>Smoothness</td></tr>
+    </table>
+    <table class="sm">
+      <tr><th colspan="2">Session recap · rolling 60–120 s</th></tr>
+      <tr><td>Time</td><td>Active · still · locomotion · static · by intensity tier · by activity</td></tr>
+      <tr><td>Locomotion</td><td>Est. steps · distance · mean/peak cadence · peak impact</td></tr>
+      <tr><td>Events</td><td>Transitions · bursts · posture changes · phone repositions</td></tr>
+      <tr><td>Quality</td><td>Mean/min signal quality · most common activity · transition log</td></tr>
+    </table>
+  </div>
+  <div class="key sm" style="margin-top:.5em"><strong>One code path:</strong> worker reuses the inference feature row + decoded label + artifact score — no separate extractor or model.</div>
+</section>
+
+<!-- ============================ RELIABILITY ============================ -->
+<section>
+  <div class="kicker">Reliability</div>
+  <h2 class="titlebar">Failure modes</h2>
+  <div class="grid g2">
+    <table class="sm">
+      <tr><th colspan="2">Ingest &amp; sensor stream</th></tr>
+      <tr><th>If this happens</th><th>System response</th></tr>
+      <tr><td>Worker falls behind</td><td>Inference queue capped (2&nbsp;000 tasks); drop <em>oldest</em> task — favour fresh windows</td></tr>
+      <tr><td>Phone retries the same batch</td><td>Dedupe on session + device + message_id — accepted once, ignored after</td></tr>
+      <tr><td>Batches arrive out of order</td><td>Track last message_id; resample still sorts points by timestamp</td></tr>
+      <tr><td>Gap or pause in upload</td><td>Window needs ≥80% time coverage — else <strong>no-data</strong>; long stillness resets HMM state</td></tr>
+      <tr><td>Too few samples in window</td><td>Reject early — <strong>no-data</strong>, never guess from a partial window</td></tr>
+    </table>
+    <table class="sm">
+      <tr><th colspan="2">Inference, ops &amp; isolation</th></tr>
+      <tr><th>If this happens</th><th>System response</th></tr>
+      <tr><td>Implausible or noisy ML output</td><td>Guards reshape probabilities; artifact score calibrates confidence down</td></tr>
+      <tr><td>Worker container crashes</td><td>Compose auto-restart; decoder state &amp; snapshots live in Redis</td></tr>
+      <tr><td>Sessions or buffers grow forever</td><td>Session TTL + capped raw ring (6&nbsp;000 pts) &amp; history lists</td></tr>
+      <tr><td>Wrong session or device writes data</td><td>Write token must match session + device in payload — else 403</td></tr>
+    </table>
+  </div>
+  <div class="note sm" style="margin-top:.5em"><strong>Typed snapshots end-to-end:</strong> success · queued · no-data · no-features · model-error · prediction-error — the dashboard and phone UI show status + detail, not a blank screen.</div>
+</section>
+
+<!-- ============================ CONTINUOUS MLOPS · LOOP ============================ -->
+<section>
+  <div class="kicker">Continuous MLOps</div>
+  <h2 class="titlebar">Closing the loop — monitor, detect, retrain, ship</h2>
+  <div class="diagram-wrap mid">
+    <pre class="mermaid">
+flowchart LR
+  PR["Production worker<br/>snapshots · history · guard rates"] --> MON["Monitor<br/>input · prediction · ops"]
+  MON --> DET{"drift or<br/>decay?"}
+  DET -->|no| MON
+  DET -->|yes| TRG["Trigger<br/>collect + label data"]
+  TRG --> RET["Retrain<br/>same offline pipeline"]
+  RET --> VAL["Validate<br/>subject-level<br/>compare old vs retrained"]
+  VAL -->|gates fail| TRG
+  VAL -->|gates pass| ROLL["Shadow → canary → ramp<br/>auto-rollback"]
+  ROLL --> PR
+    </pre>
+  </div>
+  <div class="grid g3" style="margin-top:.4em">
+    <div class="card accent sm"><h3>Telemetry built in</h3><span class="muted tiny">every window persists snapshot + history — drift monitoring reads that same stream</span></div>
+    <div class="card sm"><h3>Reuse, don't rebuild</h3><span class="muted tiny">retraining is the <em>same</em> offline pipeline + subject-level eval — parity guarantees train = serve</span></div>
+    <div class="card sm"><h3>Promotion stays gated</h3><span class="muted tiny">a challenger ships only after it beats the champion on held-out subjects + passes invariants</span></div>
+  </div>
+</section>
+
+<!-- ============================ CONTINUOUS MLOPS · MONITORING ============================ -->
+<section>
+  <div class="kicker">Continuous MLOps · monitoring</div>
+  <h2 class="titlebar">Watch the inputs, not just accuracy</h2>
+  <p class="sub" style="margin:-.2em 0 .55em;font-size:.82em;color:var(--muted)">In production you rarely know the true activity — monitor proxy signals the worker already writes.</p>
+  <div class="grid g2">
+    <table class="sm">
+      <tr><th>What to watch (no labels needed)</th><th>What it tells you</th></tr>
+      <tr><td>Input / feature drift</td><td>new devices, carry styles, user mix</td></tr>
+      <tr><td>Prediction drift</td><td>class mix or confidence shifting</td></tr>
+      <tr><td>Guard &amp; gate rates</td><td>spikes in low-motion, hallucination, no-data</td></tr>
+      <tr><td>Data quality</td><td>sample rate, gaps, saturation, dead axes</td></tr>
+      <tr><td>Operational health</td><td>latency, queue depth, throughput</td></tr>
+    </table>
+    <table class="sm">
+      <tr><th>How to detect a shift</th><th>Used on</th></tr>
+      <tr><td>Distribution shift score (PSI)</td><td>each feature vs training baseline</td></tr>
+      <tr><td>Distribution test (K–S)</td><td>per-feature "same as before?"</td></tr>
+      <tr><td>Trend tracker (rolling / CUSUM)</td><td>confidence &amp; guard rates over time</td></tr>
+      <tr><td>Slice by segment</td><td>device · OS · carry position</td></tr>
+    </table>
+  </div>
+  <div class="warn sm" style="margin-top:.5em"><strong>HAR catch:</strong> true labels are scarce live. Lean on the drift signals above, plus occasional labelled recording sessions and saving uncertain / guard-fired windows for later labelling.</div>
+</section>
+
+<!-- ============================ EDGE DEVICE ============================ -->
+<section class="slide-edge">
+  <div class="kicker">Roadmap · edge</div>
+  <h2 class="titlebar">Running on an edge device</h2>
+  <p class="sub" style="margin:-.2em 0 .45em;font-size:.82em;color:var(--muted)">Same pipeline, not a redesign — prove parity stage-by-stage, then measure on real hardware.</p>
+  <div class="diagram-wrap xcompact">
+    <pre class="mermaid">
+flowchart LR
+  IMU["IMU · 50 Hz"] --> RB["ring buffer"]
+  RB --> WIN["128-sample window"]
+  WIN --> PIPE["filter → features → trees → HMM"]
+  PIPE --> OUT["label snapshot"]
+  PIPE --> SLP["CPU sleep"]
+  FLASH["flash: trees + constants"] -.-> PIPE
+  RAM["RAM: buffers + session state"] -.-> PIPE
+    </pre>
+  </div>
+  <div class="grid g3">
+    <div class="card accent">
+      <h3>↓ Memory</h3>
+      <ul>
+        <li>Compact tree export to flash</li>
+        <li>Window-sized buffers only</li>
+        <li>Cap runtime / decoder state</li>
+      </ul>
+    </div>
+    <div class="card accent">
+      <h3>↓ Compute</h3>
+      <ul>
+        <li>XGBoost trees are if/else statements</li>
+        <li>Infer on window ready, not per sample</li>
+        <li>Fixed-cost features · HW DSP if needed</li>
+      </ul>
+    </div>
+    <div class="card accent">
+      <h3>↓ Power</h3>
+      <ul>
+        <li>Sensor FIFO · sleep between windows</li>
+        <li>Send labels, not raw sensor data</li>
+        <li>Signed OTA model updates</li>
+      </ul>
+    </div>
+  </div>
+  <div class="key sm">Rollout: parity in CI → measure on hardware → optimize → signed OTA.</div>
+</section>
+
+<!-- ============================ CLOSING ============================ -->
+<section data-background-color="#0c1733">
+  <div class="center-v">
+    <div class="kicker">Summary</div>
+    <h2 style="font-size:1.9em; border:0; margin-bottom:.4em">Noisy signals → trustworthy labels, in real time</h2>
+    <div class="grid g4">
+      <div class="card sm"><h3>Signals</h3><span class="muted tiny">contract · gravity/body · guards · quality gating</span></div>
+      <div class="card sm"><h3>Model</h3><span class="muted tiny">boosted trees + causal online decoding</span></div>
+      <div class="card sm"><h3>Systems</h3><span class="muted tiny">decoupled worker · shared state · failure modes</span></div>
+      <div class="card sm"><h3>Lifecycle</h3><span class="muted tiny">parity · tests · reproducible deploy · edge-ready</span></div>
+    </div>
+    <p style="margin-top:1em" class="muted">Live: <a href="https://motionlens.duckdns.org">motionlens.duckdns.org</a> &nbsp;·&nbsp; 90.0% decoded · subject-level holdout · same pipeline cloud → edge</p>
+  </div>
+</section>
+
+<!-- ============================ QUESTIONS ============================ -->
+<section data-background-color="#0c1733">
+  <div class="center-v">
+    <div class="kicker">Thank you</div>
+    <h2 style="font-size:2.2em; border:0; margin-bottom:.35em">Questions?</h2>
+    <p class="lead muted" style="font-size:1.05em; max-width:36ch">MotionLens — real-time pocket HAR, live and edge-ready by design.</p>
+    <div style="margin-top:1.1em">
+      <span class="pill a"><a href="https://motionlens.duckdns.org">motionlens.duckdns.org</a></span>
+      <span class="pill">Oana Laitinen</span>
+    </div>
+    <p class="faint tiny" style="margin-top:1em">Reference slides follow — datasets, methods, guards, all 153 features</p>
+  </div>
+</section>
+
+<!-- ============================ DATA REFERENCES ============================ -->
+<section>
+  <div class="kicker">References · data</div>
+  <h2 class="titlebar">Training datasets — pocket scope</h2>
+  <div class="grid g2">
+    <table class="tiny">
+      <tr><th>Ref</th><th>Dataset</th><th>Carry</th><th>Role</th></tr>
+      <tr><td>[D1]</td><td>WISDM</td><td>front pocket · 20→50 Hz</td><td>eval</td></tr>
+      <tr><td>[D2]</td><td>MotionSense</td><td>front pocket · 50 Hz</td><td>eval</td></tr>
+      <tr><td>[D3]</td><td>WISDM v2</td><td>front pocket · 20→50 Hz</td><td>eval</td></tr>
+      <tr><td>[D4]</td><td>RealWorld2016</td><td>thigh stream · ~50 Hz</td><td>eval</td></tr>
+      <tr><td>[D5]</td><td>UniMiB-SHAR</td><td>front pocket · 50 Hz</td><td>eval</td></tr>
+      <tr><td>[D6]</td><td>UMAFall</td><td>right pocket · 200→50 Hz</td><td>eval</td></tr>
+    </table>
+    <table class="tiny">
+      <tr><th>Ref</th><th>Dataset</th><th>Carry</th><th>Role</th></tr>
+      <tr><td>[D7]</td><td>Shoaib 2013</td><td>jeans pocket · 50 Hz</td><td>train</td></tr>
+      <tr><td>[D8]</td><td>Shoaib Sensors</td><td>both pockets · 50 Hz</td><td>eval</td></tr>
+      <tr><td>[D9]</td><td>UT Complex</td><td>pocket · 50 Hz</td><td>train</td></tr>
+      <tr><td>—</td><td>iPhone Placement Sweep</td><td>lateral hip · ~100→50 Hz</td><td>train · repo-local</td></tr>
+    </table>
+  </div>
+  <p class="tiny muted" style="margin-top:.45em">All resampled to the same 50 Hz contract · subject-level holdout where test subjects exist · DOIs in <code class="inline">README.md</code> ([D1]–[D9])</p>
+</section>
+
+<!-- ============================ SOURCES SIGNAL ============================ -->
+<section>
+  <div class="kicker">References · signal</div>
+  <h2 class="titlebar">Evidence-backed preprocessing choices</h2>
+  <table class="sm">
+    <tr><th>Choice</th><th>In code</th><th>Source</th></tr>
+    <tr><td>50 Hz target rate</td><td><code class="inline">DEFAULT_TARGET_SAMPLE_RATE_HZ = 50</code></td><td>UCI HAR smartphone benchmark [M1] · MotionSense pocket proxy [D2]</td></tr>
+    <tr><td>128-sample window · 50% overlap</td><td><code class="inline">WINDOW_SAMPLES = 128</code> · 64-sample step</td><td>UCI HAR canonical window [M1] · sliding-window HAR standard [M2]</td></tr>
+    <tr><td>Gravity / body split</td><td>per-axis low-pass → body = total − gravity</td><td>UCI HAR 0.3 Hz Butterworth gravity channel [M1]</td></tr>
+    <tr><td>0.3 Hz · 3rd-order Butterworth</td><td><code class="inline">DEFAULT_GRAVITY_CUTOFF_HZ = 0.3</code></td><td>Same filter topology as [M1]; RealWorld2016 waist ACC ≈ 9.81 m/s² DC [M3]</td></tr>
+    <tr><td>Cadence validity band</td><td>0.5–4.0 Hz on body magnitude features</td><td>Trunk-ACC stride periodicity [M4] · pocket walk/run 1.77–2.79 Hz [F19]</td></tr>
+    <tr><td>Subject-level holdout</td><td>~20% test subjects per dataset</td><td>Only honest unseen-person estimate for HAR [M1] · enforced in offline training</td></tr>
+  </table>
+  <p class="tiny muted" style="margin-top:.35em">[M1] Anguita et al. 2013 · DOI:10.24432/C54S4K &nbsp;·&nbsp; [M2] Bulling et al. 2014 · DOI:10.1145/2499621 &nbsp;·&nbsp; [M3] Sztyler &amp; Stuckenschmidt 2016 · DOI:10.1109/PERCOM.2016.7456521 &nbsp;·&nbsp; [M4] Zijlstra &amp; Hof 2003 · DOI:10.1016/S0966-6362(02)00190-X</p>
+</section>
+
+<!-- ============================ SOURCES MODEL ============================ -->
+<section>
+  <div class="kicker">References · model</div>
+  <h2 class="titlebar">Classifier, features &amp; temporal decode</h2>
+  <table class="sm">
+    <tr><th>Choice</th><th>In code</th><th>Source</th></tr>
+    <tr><td>XGBoost multiclass emission</td><td><code class="inline">XGBClassifier</code> in shipped bundle</td><td>Gradient boosted trees [M5] · trunk-ACC tree HAR baseline 98.5% (7-class) [M6]</td></tr>
+    <tr><td>153 engineered features</td><td>time · FFT · wavelet · AR · cross-axis · gravity/body · jerk · cadence</td><td>Feature families aligned with [M1] + [M6] (DC/gravity proxy, correlations, spectral entropy)</td></tr>
+    <tr><td>Static specialist (sit/lay vs stand)</td><td>2-class booster · gated blend</td><td>Holdout-tuned on pocket data — no separate literature threshold set</td></tr>
+    <tr><td>Causal HMM decode</td><td><code class="inline">causal_hmm_step</code> · posterior per session</td><td>Online forward filtering on learned transitions [M2] · transition stats from training labels</td></tr>
+    <tr><td>Hyperparameter search</td><td>Optuna · scores full decode path</td><td>Optuna framework [M7] · macro-F1 on subject-grouped validation fold</td></tr>
+  </table>
+  <p class="tiny muted" style="margin-top:.35em">[M5] Chen &amp; Guestrin 2016 · DOI:10.1145/2939672.2939785 &nbsp;·&nbsp; [M6] Mannini &amp; Sabatini 2010 · DOI:10.3390/s100201154 &nbsp;·&nbsp; [M7] Akiba et al. 2019 · DOI:10.1145/3292500.3330721</p>
+</section>
+
+<!-- ============================ SOURCES GUARDS ============================ -->
+<section>
+  <div class="kicker">References · guards</div>
+  <h2 class="titlebar">Live guard chain — what runs &amp; what it rests on</h2>
+  <div class="grid g2">
+    <table class="tiny">
+      <tr><th colspan="2">Pre-decode (before HMM)</th></tr>
+      <tr><td>Low-motion gate</td><td>zeros locomotion if <code class="inline">body_mag_energy</code> &lt; 0.1</td></tr>
+      <tr><td>Stairs static guard</td><td>caps stairs when energy / jerk / dom freq too low</td></tr>
+      <tr><td>Stairs moving-window guard</td><td>requires smoothed stairs + walk/run mass</td></tr>
+      <tr><td>Smooth-walk guard</td><td>front-pocket walk bias when cadence band matches</td></tr>
+      <tr><td>Stairs hallucination guard</td><td>caps stairs on extreme jerk / energy outliers</td></tr>
+    </table>
+    <table class="tiny">
+      <tr><th colspan="2">Post-decode (after HMM)</th></tr>
+      <tr><td>Stairs failsafe</td><td>overrides implausible decoded stairs</td></tr>
+      <tr><td>Locomotion ↔ transitions</td><td>high-energy “transitions” → walk/run</td></tr>
+      <tr><td>Artifact confidence blend</td><td>down-weights overconfidence under loose pocket</td></tr>
+      <tr><td>Pocket sanity correction</td><td>cadence/periodicity demote run/stairs</td></tr>
+    </table>
+  </div>
+  <table class="sm" style="margin-top:.4em">
+    <tr><th>Principle</th><th>Literature / data basis</th><th>Thresholds</th></tr>
+    <tr><td>Static vs locomotion energy</td><td>RealWorld2016: lying/stand/sit std ≈ 0.12–0.26 m/s² vs walk ≈ 2.19 · run ≈ 6.06 [M3]</td><td>0.1 m/s² gate — holdout-calibrated</td></tr>
+    <tr><td>Cadence / periodicity checks</td><td>Trunk ACC stride frequency [M4] · pocket cadence stable 1.77–2.79 Hz [F19]</td><td>guard cutoffs — holdout-calibrated</td></tr>
+    <tr><td>Loose-pocket artifact score</td><td>Pocket phone ACC is fabric-coupled &amp; high-frequency noisy [D1] · adaptive z-score vs session history</td><td>feature weights — holdout-calibrated</td></tr>
+    <tr><td>Postural vs high-energy “transitions”</td><td>Genuine sit↔stand ≪ locomotion body energy; running with turns is aperiodic [M3]</td><td>8 / 12 m/s² demotion — holdout-calibrated</td></tr>
+  </table>
+  <p class="tiny muted" style="margin-top:.3em">Guards are hand-coded rules — physical priors from literature, numeric cutoffs tuned on subject holdout (not copied from papers).</p>
+</section>
+
+<!-- ============================ FEATURE REFERENCE (153 features) ============================ -->
+<!-- ============================ FEATURES 1/4 ============================ -->
+<section class="slide-feature-ref">
+  <div class="kicker">References · features (1/4)</div>
+  <h2 class="titlebar">153 engineered features — formula &amp; meaning</h2>
+  <p class="feat-intro muted">128 samples @ 50 Hz &middot; gravity = 0.3 Hz Butterworth LP &middot; body = total − gravity &middot; |body| = √(bx²+by²+bz²) &middot; 153 features</p>
+  <table>
+    <tr><th>Feature</th><th>Formula</th><th>Meaning</th></tr>
+    <tr><td><code class="inline">body_x_mean</code></td><td class="formula">μ = mean(b_x)</td><td>Mean on body x-axis</td></tr>
+    <tr><td><code class="inline">body_x_std</code></td><td class="formula">σ = std(b_x)</td><td>Std dev on body x-axis</td></tr>
+    <tr><td><code class="inline">body_x_rms</code></td><td class="formula">√(mean(b_x²))</td><td>RMS on body x-axis</td></tr>
+    <tr><td><code class="inline">body_x_mad</code></td><td class="formula">mean(|b_x - μ|)</td><td>Median abs dev from mean on body x-axis</td></tr>
+    <tr><td><code class="inline">body_x_min</code></td><td class="formula">min(b_x)</td><td>Minimum on body x-axis</td></tr>
+    <tr><td><code class="inline">body_x_max</code></td><td class="formula">max(b_x)</td><td>Maximum on body x-axis</td></tr>
+    <tr><td><code class="inline">body_x_zcr</code></td><td class="formula">mean(signchange(b_x))</td><td>Zero-crossing rate on body x-axis</td></tr>
+    <tr><td><code class="inline">body_x_skew</code></td><td class="formula">E[((b_x-μ)/σ)³]</td><td>Skewness on body x-axis</td></tr>
+    <tr><td><code class="inline">body_x_kurt</code></td><td class="formula">E[((b_x-μ)/σ)⁴] - 3</td><td>Excess kurtosis on body x-axis</td></tr>
+    <tr><td><code class="inline">body_y_mean</code></td><td class="formula">μ = mean(b_y)</td><td>Mean on body y-axis</td></tr>
+    <tr><td><code class="inline">body_y_std</code></td><td class="formula">σ = std(b_y)</td><td>Std dev on body y-axis</td></tr>
+    <tr><td><code class="inline">body_y_rms</code></td><td class="formula">√(mean(b_y²))</td><td>RMS on body y-axis</td></tr>
+    <tr><td><code class="inline">body_y_mad</code></td><td class="formula">mean(|b_y - μ|)</td><td>Median abs dev from mean on body y-axis</td></tr>
+    <tr><td><code class="inline">body_y_min</code></td><td class="formula">min(b_y)</td><td>Minimum on body y-axis</td></tr>
+    <tr><td><code class="inline">body_y_max</code></td><td class="formula">max(b_y)</td><td>Maximum on body y-axis</td></tr>
+    <tr><td><code class="inline">body_y_zcr</code></td><td class="formula">mean(signchange(b_y))</td><td>Zero-crossing rate on body y-axis</td></tr>
+    <tr><td><code class="inline">body_y_skew</code></td><td class="formula">E[((b_y-μ)/σ)³]</td><td>Skewness on body y-axis</td></tr>
+    <tr><td><code class="inline">body_y_kurt</code></td><td class="formula">E[((b_y-μ)/σ)⁴] - 3</td><td>Excess kurtosis on body y-axis</td></tr>
+    <tr><td><code class="inline">body_z_mean</code></td><td class="formula">μ = mean(b_z)</td><td>Mean on body z-axis</td></tr>
+    <tr><td><code class="inline">body_z_std</code></td><td class="formula">σ = std(b_z)</td><td>Std dev on body z-axis</td></tr>
+    <tr><td><code class="inline">body_z_rms</code></td><td class="formula">√(mean(b_z²))</td><td>RMS on body z-axis</td></tr>
+    <tr><td><code class="inline">body_z_mad</code></td><td class="formula">mean(|b_z - μ|)</td><td>Median abs dev from mean on body z-axis</td></tr>
+    <tr><td><code class="inline">body_z_min</code></td><td class="formula">min(b_z)</td><td>Minimum on body z-axis</td></tr>
+    <tr><td><code class="inline">body_z_max</code></td><td class="formula">max(b_z)</td><td>Maximum on body z-axis</td></tr>
+    <tr><td><code class="inline">body_z_zcr</code></td><td class="formula">mean(signchange(b_z))</td><td>Zero-crossing rate on body z-axis</td></tr>
+    <tr><td><code class="inline">body_z_skew</code></td><td class="formula">E[((b_z-μ)/σ)³]</td><td>Skewness on body z-axis</td></tr>
+    <tr><td><code class="inline">body_z_kurt</code></td><td class="formula">E[((b_z-μ)/σ)⁴] - 3</td><td>Excess kurtosis on body z-axis</td></tr>
+    <tr><td><code class="inline">body_corr_xy</code></td><td class="formula">corr(b_x, b_y)</td><td>Pearson correlation x–y</td></tr>
+    <tr><td><code class="inline">body_corr_xz</code></td><td class="formula">corr(b_x, b_z)</td><td>Pearson correlation x–z</td></tr>
+    <tr><td><code class="inline">body_corr_yz</code></td><td class="formula">corr(b_y, b_z)</td><td>Pearson correlation y–z</td></tr>
+    <tr><td><code class="inline">body_sma</code></td><td class="formula">mean(|b_x|+|b_y|+|b_z|)</td><td>Signal magnitude average</td></tr>
+    <tr><td><code class="inline">body_x_energy</code></td><td class="formula">mean(b_x²)</td><td>Mean squared x energy</td></tr>
+    <tr><td><code class="inline">body_y_energy</code></td><td class="formula">mean(b_y²)</td><td>Mean squared y energy</td></tr>
+    <tr><td><code class="inline">body_z_energy</code></td><td class="formula">mean(b_z²)</td><td>Mean squared z energy</td></tr>
+    <tr><td><code class="inline">body_energy_xy_ratio</code></td><td class="formula">E_x / E_y</td><td>x vs y energy ratio</td></tr>
+    <tr><td><code class="inline">body_energy_xz_ratio</code></td><td class="formula">E_x / E_z</td><td>x vs z energy ratio</td></tr>
+    <tr><td><code class="inline">body_energy_yz_ratio</code></td><td class="formula">E_y / E_z</td><td>y vs z energy ratio</td></tr>
+  </table>
+</section>
+
+<!-- ============================ FEATURES 2/4 ============================ -->
+<section class="slide-feature-ref">
+  <div class="kicker">References · features (2/4)</div>
+  <h2 class="titlebar">153 engineered features — formula &amp; meaning</h2>
+  
+  <table>
+    <tr><th>Feature</th><th>Formula</th><th>Meaning</th></tr>
+    <tr><td><code class="inline">jerk_x_rms</code></td><td class="formula">√(mean(j_x²)), j=Δ b · f_s</td><td>x jerk RMS</td></tr>
+    <tr><td><code class="inline">jerk_y_rms</code></td><td class="formula">√(mean(j_y²))</td><td>y jerk RMS</td></tr>
+    <tr><td><code class="inline">jerk_z_rms</code></td><td class="formula">√(mean(j_z²))</td><td>z jerk RMS</td></tr>
+    <tr><td><code class="inline">jerk_mag_mean</code></td><td class="formula">mean(|j|)</td><td>Mean jerk magnitude</td></tr>
+    <tr><td><code class="inline">jerk_mag_std</code></td><td class="formula">std(|j|)</td><td>Jerk magnitude variability</td></tr>
+    <tr class="guard-feature"><td><code class="inline">jerk_mag_rms</code></td><td class="formula">√(mean(|j|²))</td><td>Jerk magnitude RMS</td></tr>
+    <tr class="guard-feature"><td><code class="inline">jerk_mag_p90</code></td><td class="formula">P_90(|j|)</td><td>High jerk tail (impacts)</td></tr>
+    <tr><td><code class="inline">jerk_mag_iqr</code></td><td class="formula">P_75-P_25</td><td>Jerk spread</td></tr>
+    <tr><td><code class="inline">jerk_mag_dom_freq_hz</code></td><td class="formula">argmax |RFFT(j)|</td><td>Dominant jerk frequency</td></tr>
+    <tr class="guard-feature"><td><code class="inline">body_mag_dom_freq_hz</code></td><td class="formula">argmax P(f) on |body|</td><td>Dominant body-mag frequency</td></tr>
+    <tr class="guard-feature"><td><code class="inline">body_mag_spectral_entropy</code></td><td class="formula">-Σ p_ilog p_i / log n</td><td>Spectral complexity</td></tr>
+    <tr class="guard-feature"><td><code class="inline">body_mag_energy</code></td><td class="formula">mean(|body|²)</td><td>Total body motion energy</td></tr>
+    <tr class="guard-feature"><td><code class="inline">body_mag_energy_0p5_4_hz</code></td><td class="formula">Σ_0.5&lt;f&lt;4 P(f)</td><td>Locomotion band power</td></tr>
+    <tr><td><code class="inline">body_mag_energy_0p1_0p5_hz</code></td><td class="formula">Σ_0.1&lt;f&lt;0.5 P(f)</td><td>Low-frequency / postural band</td></tr>
+    <tr><td><code class="inline">body_mag_p10</code></td><td class="formula">P_10(|body|)</td><td>10th percentile magnitude</td></tr>
+    <tr><td><code class="inline">body_mag_p50</code></td><td class="formula">P_50(|body|)</td><td>Median magnitude</td></tr>
+    <tr><td><code class="inline">body_mag_p90</code></td><td class="formula">P_90(|body|)</td><td>90th percentile magnitude</td></tr>
+    <tr><td><code class="inline">body_mag_iqr</code></td><td class="formula">P_75-P_25</td><td>Magnitude spread</td></tr>
+    <tr><td><code class="inline">body_mag_range</code></td><td class="formula">max-min</td><td>Peak-to-peak magnitude</td></tr>
+    <tr><td><code class="inline">body_mag_coeff_var</code></td><td class="formula">σ / μ</td><td>Relative variability</td></tr>
+    <tr><td><code class="inline">body_mag_median_abs_dev</code></td><td class="formula">median(||body|-med|)</td><td>Robust spread</td></tr>
+    <tr><td><code class="inline">body_mag_skew</code></td><td class="formula">Skew of |body|</td><td>Asymmetric bursts</td></tr>
+    <tr><td><code class="inline">body_mag_kurt</code></td><td class="formula">Kurtosis of |body|</td><td>Heavy-tail impacts</td></tr>
+    <tr><td><code class="inline">body_mag_autocorr_peak</code></td><td class="formula">max R(τ), τ∈[1/f_max,1/f_min]</td><td>Autocorr peak height</td></tr>
+    <tr><td><code class="inline">body_mag_autocorr_lag_s</code></td><td class="formula">Lag τ at peak</td><td>Stride period estimate</td></tr>
+    <tr class="guard-feature"><td><code class="inline">body_mag_autocorr_peak_freq_hz</code></td><td class="formula">1/τ</td><td>Cadence from autocorr</td></tr>
+    <tr class="guard-feature"><td><code class="inline">body_mag_autocorr_periodicity_ratio</code></td><td class="formula">peak / mean(|R|)</td><td>Rhythmic vs aperiodic</td></tr>
+    <tr><td><code class="inline">body_mag_peak_count</code></td><td class="formula"># peaks in |body|</td><td>Step-like events</td></tr>
+    <tr><td><code class="inline">body_mag_peak_rate_hz</code></td><td class="formula">count / window duration</td><td>Event rate</td></tr>
+    <tr><td><code class="inline">body_mag_peak_prominence_mean</code></td><td class="formula">mean peak prominence</td><td>Peak sharpness</td></tr>
+    <tr><td><code class="inline">body_mag_peak_prominence_std</code></td><td class="formula">std peak prominence</td><td>Peak sharpness variability</td></tr>
+    <tr><td><code class="inline">body_mag_interpeak_interval_mean</code></td><td class="formula">mean Δ t between peaks</td><td>Mean stride interval</td></tr>
+    <tr><td><code class="inline">body_mag_interpeak_interval_std</code></td><td class="formula">std Δ t</td><td>Stride interval variability</td></tr>
+    <tr><td><code class="inline">body_mag_interpeak_interval_cv</code></td><td class="formula">std/mean interval</td><td>Cadence regularity</td></tr>
+    <tr><td><code class="inline">gravity_mag_mean</code></td><td class="formula">mean(|g|)</td><td>Mean gravity magnitude (~9.81)</td></tr>
+    <tr><td><code class="inline">gravity_x_mean</code></td><td class="formula">mean(g_x)</td><td>Mean gravity x</td></tr>
+    <tr><td><code class="inline">gravity_y_mean</code></td><td class="formula">mean(g_y)</td><td>Mean gravity y</td></tr>
+    <tr><td><code class="inline">gravity_z_mean</code></td><td class="formula">mean(g_z)</td><td>Mean gravity z</td></tr>
+    <tr><td><code class="inline">gravity_x_std</code></td><td class="formula">std(g_x)</td><td>Gravity x wobble</td></tr>
+  </table>
+</section>
+
+<!-- ============================ FEATURES 3/4 ============================ -->
+<section class="slide-feature-ref">
+  <div class="kicker">References · features (3/4)</div>
+  <h2 class="titlebar">153 engineered features — formula &amp; meaning</h2>
+  
+  <table>
+    <tr><th>Feature</th><th>Formula</th><th>Meaning</th></tr>
+    <tr><td><code class="inline">gravity_y_std</code></td><td class="formula">std(g_y)</td><td>Gravity y wobble</td></tr>
+    <tr><td><code class="inline">gravity_z_std</code></td><td class="formula">std(g_z)</td><td>Gravity z wobble</td></tr>
+    <tr><td><code class="inline">gravity_tilt_abs_z_mean</code></td><td class="formula">mean(arccos(|g_z|/|g|))</td><td>Mean tilt from vertical</td></tr>
+    <tr><td><code class="inline">gravity_tilt_abs_z_std</code></td><td class="formula">std(tilt)</td><td>Orientation instability</td></tr>
+    <tr><td><code class="inline">gravity_tilt_abs_z_range</code></td><td class="formula">max tilt - min tilt</td><td>Tilt swing in window</td></tr>
+    <tr><td><code class="inline">gravity_tilt_abs_z_p90</code></td><td class="formula">P_90(tilt)</td><td>High tilt tail</td></tr>
+    <tr><td><code class="inline">gravity_max_axis_alignment_mean</code></td><td class="formula">mean(max(|g_i|)/|g|)</td><td>Dominant gravity axis</td></tr>
+    <tr><td><code class="inline">gravity_max_axis_alignment_std</code></td><td class="formula">std(alignment)</td><td>Axis dominance variability</td></tr>
+    <tr><td><code class="inline">gravity_axis_entropy_mean</code></td><td class="formula">mean(H(|g_i|/|g|))</td><td>Gravity spread across axes</td></tr>
+    <tr><td><code class="inline">gravity_axis_entropy_std</code></td><td class="formula">std(entropy)</td><td>Entropy variability</td></tr>
+    <tr class="guard-feature"><td><code class="inline">gravity_angle_stability_std</code></td><td class="formula">std(∠(g, \bar g))</td><td>Gravity vector stability</td></tr>
+    <tr><td><code class="inline">body_vertical_mean</code></td><td class="formula">mean(b·\hat g)</td><td>Mean motion along gravity</td></tr>
+    <tr><td><code class="inline">body_vertical_std</code></td><td class="formula">std(b·\hat g)</td><td>Vertical motion variability</td></tr>
+    <tr><td><code class="inline">body_vertical_rms</code></td><td class="formula">RMS of b·\hat g</td><td>Vertical motion energy scale</td></tr>
+    <tr><td><code class="inline">body_vertical_energy</code></td><td class="formula">mean((b·\hat g)²)</td><td>Vertical energy</td></tr>
+    <tr><td><code class="inline">body_horizontal_rms</code></td><td class="formula">RMS of |b_⊥|</td><td>Horizontal motion scale</td></tr>
+    <tr><td><code class="inline">body_horizontal_energy</code></td><td class="formula">mean(|b_⊥|²)</td><td>Horizontal energy</td></tr>
+    <tr><td><code class="inline">vertical_horizontal_energy_ratio</code></td><td class="formula">E_v / E_h</td><td>Vertical vs horizontal share</td></tr>
+    <tr><td><code class="inline">body_mag_first_half_mean</code></td><td class="formula">mean(|body|_1st)</td><td>First-half intensity</td></tr>
+    <tr><td><code class="inline">body_mag_second_half_mean</code></td><td class="formula">mean(|body|_2nd)</td><td>Second-half intensity</td></tr>
+    <tr><td><code class="inline">body_mag_half_mean_delta</code></td><td class="formula">2nd mean − 1st mean</td><td>Intensity shift in window</td></tr>
+    <tr><td><code class="inline">body_mag_first_half_energy</code></td><td class="formula">mean(|body|²_1st)</td><td>First-half energy</td></tr>
+    <tr><td><code class="inline">body_mag_second_half_energy</code></td><td class="formula">mean(|body|²_2nd)</td><td>Second-half energy</td></tr>
+    <tr><td><code class="inline">body_mag_half_energy_ratio</code></td><td class="formula">E_2nd/E_1st</td><td>Energy ramp within window</td></tr>
+    <tr><td><code class="inline">gravity_tilt_start_end_delta</code></td><td class="formula">tilt_end-tilt_start</td><td>Orientation change (transition)</td></tr>
+    <tr><td><code class="inline">body_mag_linear_trend</code></td><td class="formula">slope of linear fit on |body|</td><td>Rising/falling motion trend</td></tr>
+    <tr><td><code class="inline">body_x_dom_freq_hz</code></td><td class="formula">argmax P_x(f)</td><td>Dominant x frequency</td></tr>
+    <tr><td><code class="inline">body_y_dom_freq_hz</code></td><td class="formula">argmax P_y(f)</td><td>Dominant y frequency</td></tr>
+    <tr><td><code class="inline">body_z_dom_freq_hz</code></td><td class="formula">argmax P_z(f)</td><td>Dominant z frequency</td></tr>
+    <tr><td><code class="inline">body_mag_total_power</code></td><td class="formula">Σ P(f)</td><td>Total spectral power</td></tr>
+    <tr><td><code class="inline">body_mag_energy_4_8_hz</code></td><td class="formula">Σ_4&lt;f&lt;8 P(f)</td><td>Mid-high band energy</td></tr>
+    <tr class="guard-feature"><td><code class="inline">body_mag_energy_8_20_hz</code></td><td class="formula">Σ_8&lt;f&lt;20 P(f)</td><td>High-frequency band (pocket noise)</td></tr>
+    <tr><td><code class="inline">body_mag_spectral_centroid</code></td><td class="formula">Σ fP(f)/Σ P</td><td>Spectral center of mass</td></tr>
+    <tr><td><code class="inline">body_mag_locomotion_ratio</code></td><td class="formula">E_0.5-4/P_total</td><td>Locomotion fraction of spectrum</td></tr>
+    <tr><td><code class="inline">body_mag_rel_energy_0p1_0p5</code></td><td class="formula">E_0.1-0.5/P_total</td><td>Relative postural band</td></tr>
+    <tr><td><code class="inline">body_mag_rel_energy_0p5_1p5</code></td><td class="formula">E_0.5-1.5/P_total</td><td>Relative slow locomotion</td></tr>
+    <tr><td><code class="inline">body_mag_rel_energy_1p5_3</code></td><td class="formula">E_1.5-3/P_total</td><td>Relative walk/run band</td></tr>
+    <tr><td><code class="inline">body_mag_rel_energy_3_6</code></td><td class="formula">E_3-6/P_total</td><td>Relative fast locomotion</td></tr>
+    <tr><td><code class="inline">body_mag_spectral_spread</code></td><td class="formula">√(Σ(f-c)²P/Σ P)</td><td>Spectral bandwidth</td></tr>
+  </table>
+</section>
+
+<!-- ============================ FEATURES 4/4 ============================ -->
+<section class="slide-feature-ref">
+  <div class="kicker">References · features (4/4)</div>
+  <h2 class="titlebar">153 engineered features — formula &amp; meaning</h2>
+  
+  <table>
+    <tr><th>Feature</th><th>Formula</th><th>Meaning</th></tr>
+    <tr><td><code class="inline">body_mag_spectral_rolloff_85</code></td><td class="formula">freq at 85% cumulative power</td><td>High-frequency extent</td></tr>
+    <tr><td><code class="inline">body_mag_spectral_flatness</code></td><td class="formula">geo-mean / arith-mean of P</td><td>Tonal vs noise-like</td></tr>
+    <tr><td><code class="inline">body_x_ar_1</code></td><td class="formula">a1 in x_t = Σ(i=1..4) a_i·x(t−i) on x</td><td>AR coeff 1 on x</td></tr>
+    <tr><td><code class="inline">body_x_ar_2</code></td><td class="formula">a2 in x_t = Σ(i=1..4) a_i·x(t−i) on x</td><td>AR coeff 2 on x</td></tr>
+    <tr><td><code class="inline">body_x_ar_3</code></td><td class="formula">a3 in x_t = Σ(i=1..4) a_i·x(t−i) on x</td><td>AR coeff 3 on x</td></tr>
+    <tr><td><code class="inline">body_x_ar_4</code></td><td class="formula">a4 in x_t = Σ(i=1..4) a_i·x(t−i) on x</td><td>AR coeff 4 on x</td></tr>
+    <tr><td><code class="inline">body_y_ar_1</code></td><td class="formula">a1 in x_t = Σ(i=1..4) a_i·x(t−i) on y</td><td>AR coeff 1 on y</td></tr>
+    <tr><td><code class="inline">body_y_ar_2</code></td><td class="formula">a2 in x_t = Σ(i=1..4) a_i·x(t−i) on y</td><td>AR coeff 2 on y</td></tr>
+    <tr><td><code class="inline">body_y_ar_3</code></td><td class="formula">a3 in x_t = Σ(i=1..4) a_i·x(t−i) on y</td><td>AR coeff 3 on y</td></tr>
+    <tr><td><code class="inline">body_y_ar_4</code></td><td class="formula">a4 in x_t = Σ(i=1..4) a_i·x(t−i) on y</td><td>AR coeff 4 on y</td></tr>
+    <tr><td><code class="inline">body_z_ar_1</code></td><td class="formula">a1 in x_t = Σ(i=1..4) a_i·x(t−i) on z</td><td>AR coeff 1 on z</td></tr>
+    <tr><td><code class="inline">body_z_ar_2</code></td><td class="formula">a2 in x_t = Σ(i=1..4) a_i·x(t−i) on z</td><td>AR coeff 2 on z</td></tr>
+    <tr><td><code class="inline">body_z_ar_3</code></td><td class="formula">a3 in x_t = Σ(i=1..4) a_i·x(t−i) on z</td><td>AR coeff 3 on z</td></tr>
+    <tr><td><code class="inline">body_z_ar_4</code></td><td class="formula">a4 in x_t = Σ(i=1..4) a_i·x(t−i) on z</td><td>AR coeff 4 on z</td></tr>
+    <tr><td><code class="inline">body_mag_ar_1</code></td><td class="formula">a1 in x_t = Σ(i=1..4) a_i·x(t−i) on mag</td><td>AR coeff 1 on mag</td></tr>
+    <tr><td><code class="inline">body_mag_ar_2</code></td><td class="formula">a2 in x_t = Σ(i=1..4) a_i·x(t−i) on mag</td><td>AR coeff 2 on mag</td></tr>
+    <tr><td><code class="inline">body_mag_ar_3</code></td><td class="formula">a3 in x_t = Σ(i=1..4) a_i·x(t−i) on mag</td><td>AR coeff 3 on mag</td></tr>
+    <tr><td><code class="inline">body_mag_ar_4</code></td><td class="formula">a4 in x_t = Σ(i=1..4) a_i·x(t−i) on mag</td><td>AR coeff 4 on mag</td></tr>
+    <tr><td><code class="inline">body_xy_crosscorr_max</code></td><td class="formula">max R_xy(τ), |τ|≤0.5s</td><td>Peak x–y correlation</td></tr>
+    <tr><td><code class="inline">body_xy_crosscorr_lag_s</code></td><td class="formula">τ at peak</td><td>x–y timing offset</td></tr>
+    <tr><td><code class="inline">body_xz_crosscorr_max</code></td><td class="formula">max R_xz(τ)</td><td>Peak x–z correlation</td></tr>
+    <tr><td><code class="inline">body_xz_crosscorr_lag_s</code></td><td class="formula">τ at peak</td><td>x–z timing offset</td></tr>
+    <tr><td><code class="inline">body_yz_crosscorr_max</code></td><td class="formula">max R_yz(τ)</td><td>Peak y–z correlation</td></tr>
+    <tr><td><code class="inline">body_yz_crosscorr_lag_s</code></td><td class="formula">τ at peak</td><td>y–z timing offset</td></tr>
+    <tr><td><code class="inline">body_xy_phase_at_dom_freq</code></td><td class="formula">∠ Y-∠ X at dom freq</td><td>x–y phase at cadence</td></tr>
+    <tr><td><code class="inline">body_xz_phase_at_dom_freq</code></td><td class="formula">∠ Z-∠ X at dom freq</td><td>x–z phase at cadence</td></tr>
+    <tr><td><code class="inline">body_yz_phase_at_dom_freq</code></td><td class="formula">∠ Z-∠ Y at dom freq</td><td>y–z phase at cadence</td></tr>
+    <tr><td><code class="inline">stft_locomotion_band_mean</code></td><td class="formula">mean STFT energy 0.5–4 Hz</td><td>Locomotion band over time</td></tr>
+    <tr><td><code class="inline">stft_locomotion_band_std</code></td><td class="formula">std STFT energy 0.5–4 Hz</td><td>Locomotion band variability</td></tr>
+    <tr><td><code class="inline">stft_cadence_band_mean</code></td><td class="formula">mean STFT energy 1.4–2.5 Hz</td><td>Cadence band over time</td></tr>
+    <tr><td><code class="inline">stft_cadence_band_std</code></td><td class="formula">std STFT energy 1.4–2.5 Hz</td><td>Cadence band variability</td></tr>
+    <tr class="guard-feature"><td><code class="inline">stft_dom_freq_std</code></td><td class="formula">std of per-frame dom freq</td><td>Step frequency jitter</td></tr>
+    <tr><td><code class="inline">dwt_d1_energy</code></td><td class="formula">||d_1||² / total</td><td>Finest wavelet detail share</td></tr>
+    <tr><td><code class="inline">dwt_d2_energy</code></td><td class="formula">||d_2||² / total</td><td>Detail level 2 share</td></tr>
+    <tr><td><code class="inline">dwt_d3_energy</code></td><td class="formula">||d_3||² / total</td><td>Detail level 3 share</td></tr>
+    <tr><td><code class="inline">dwt_d4_energy</code></td><td class="formula">||d_4||² / total</td><td>Detail level 4 share</td></tr>
+    <tr><td><code class="inline">dwt_a4_energy</code></td><td class="formula">||a_4||² / total</td><td>Approximation share</td></tr>
+    <tr><td><code class="inline">dwt_high_low_ratio</code></td><td class="formula">(d_1+d_2+d_3)/(d_4+a_4)</td><td>High vs low frequency burst ratio</td></tr>
+  </table>
+</section>
+
+
+
+
+
+
+
+
+</div>
+</div>
+
+<div class="deck-footer">MotionLens · Technical Deep Dive &nbsp;—&nbsp; →/← navigate · F fullscreen · Esc overview</div>
+
+<script src="https://cdn.jsdelivr.net/npm/reveal.js@5.1.0/dist/reveal.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/reveal.js@5.1.0/plugin/highlight/highlight.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+<script>
+  mermaid.initialize({
+    startOnLoad: false,
+    securityLevel: 'loose',
+    theme: 'base',
+    flowchart: { htmlLabels: true, curve: 'basis', useMaxWidth: false, nodeSpacing: 45, rankSpacing: 55 },
+    sequence: { useMaxWidth: false, wrap: true, messageFontSize: 15, actorFontSize: 15, noteFontSize: 13, mirrorActors: false, boxMargin: 8, messageMargin: 32 },
+    themeVariables: {
+      fontFamily: 'Inter, system-ui, sans-serif', fontSize: '16px',
+      background: 'transparent',
+      primaryColor: '#13203b', primaryTextColor: '#e8eef8', primaryBorderColor: '#2fe0cf',
+      secondaryColor: '#16244a', tertiaryColor: '#0f1830',
+      lineColor: '#5b8cff', textColor: '#e8eef8',
+      clusterBkg: '#0d1730', clusterBorder: '#2a3a5c',
+      nodeBorder: '#2fe0cf', edgeLabelBackground: '#0a1020',
+      actorBkg: '#13203b', actorBorder: '#2fe0cf', actorTextColor: '#e8eef8',
+      signalColor: '#9db0cd', signalTextColor: '#cfe0ff',
+      labelBoxBkgColor: '#13203b', labelBoxBorderColor: '#2fe0cf', labelTextColor: '#e8eef8',
+      noteBkgColor: '#16244a', noteTextColor: '#e8eef8', noteBorderColor: '#5b8cff',
+      loopTextColor: '#9db0cd'
+    }
+  });
+
+  var mmdSeq = 0;
+  // The browser HTML-encodes the diagram source (e.g. arrows --> become --&gt;).
+  // mermaid.render() needs the decoded text, but we must keep <br/> line breaks.
+  function extractMermaidCode(el) {
+    var html = el.getAttribute('data-code');
+    if (html === null) { html = el.innerHTML; el.setAttribute('data-code', html); }
+    html = html.replace(/<br\s*\/?>/gi, '@@BR@@');     // protect line breaks
+    var ta = document.createElement('textarea');
+    ta.innerHTML = html;                                // decode &gt; &lt; &amp; ...
+    return ta.value.replace(/@@BR@@/g, '<br/>');        // restore line breaks
+  }
+  function renderMermaidInCurrentSlide() {
+    var slide = Reveal.getCurrentSlide();
+    if (!slide) return;
+    var nodes = slide.querySelectorAll('.mermaid:not([data-processed])');
+    Array.prototype.forEach.call(nodes, function(el) {
+      var code = extractMermaidCode(el);
+      el.setAttribute('data-processed', 'true');
+      // Render off-DOM: Mermaid measures labels in a temp node on <body>, which is
+      // NOT affected by Reveal's slide scaling, so node boxes are sized correctly
+      // and text always fits, regardless of window size / zoom.
+      mermaid.render('mmd-' + (++mmdSeq), code).then(function(res) {
+        el.innerHTML = res.svg;
+        if (res.bindFunctions) res.bindFunctions(el);
+        Reveal.layout();
+      }).catch(function(err) {
+        // Safety net: if off-DOM render fails, fall back to the proven in-place
+        // renderer so the user never sees raw diagram code.
+        console.error('mermaid.render failed; falling back to mermaid.run', err);
+        el.innerHTML = el.getAttribute('data-code') || '';
+        el.removeAttribute('data-processed');
+        mermaid.run({ nodes: [el] })
+          .then(function(){ Reveal.layout(); })
+          .catch(function(e2){ console.error('mermaid.run fallback failed', e2); });
+      });
+    });
+  }
+
+  Reveal.initialize({
+    width: 1280, height: 720, margin: 0.04,
+    minScale: 0.2, maxScale: 1.6,
+    hash: true, slideNumber: 'c/t', controls: true, progress: true,
+    center: false, transition: 'slide', transitionSpeed: 'fast',
+    plugins: [RevealHighlight]
+  });
+
+  // Render Mermaid only AFTER web fonts are ready, so labels are measured with
+  // the real font (Inter). Otherwise boxes are sized for a fallback font and the
+  // text overflows / gets clipped. Fallback timer in case font loading stalls.
+  var fontsReady = false;
+  function gatedRender(){ if (fontsReady) renderMermaidInCurrentSlide(); }
+  (document.fonts && document.fonts.ready ? document.fonts.ready : Promise.resolve())
+    .then(function(){ fontsReady = true; renderMermaidInCurrentSlide(); });
+  setTimeout(function(){ if (!fontsReady){ fontsReady = true; renderMermaidInCurrentSlide(); } }, 1500);
+
+  Reveal.on('ready', gatedRender);
+  Reveal.on('slidechanged', gatedRender);
+</script>
+</body>
+</html>
